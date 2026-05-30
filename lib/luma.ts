@@ -38,30 +38,45 @@ export class LumaFetchError extends Error {
 // --- Public entrypoints --------------------------------------------------
 
 /**
- * Smart entrypoint: accepts one or many event URLs separated by whitespace,
- * commas, or newlines. Returns the union of fetched events, deduped by id.
+ * Smart entrypoint: accepts either
  *
- *   "https://lu.ma/h7h9r7bw"
- *   "https://lu.ma/abc123, https://lu.ma/def456"
- *   multi-line paste of URLs
+ *   (a) a personal Luma iCal subscription URL — `https://api.lu.ma/ics/get?...`
+ *       The signed token in the query string IS the user's auth. Pull all
+ *       upcoming + past events the user has RSVP'd to or hosts.
+ *   (b) one or many Luma event URLs separated by whitespace / commas /
+ *       newlines — fetched individually from public event pages.
  *
- * NOTE: bare username / profile URL is NOT supported. Luma's user-events
- * API is private (loaded client-side via authed JS). We surface a clear
- * error instructing the user to paste individual event URLs instead.
+ * Returns the union of fetched events, deduped by id.
  */
 export async function fetchLumaFromInput(input: string): Promise<LumaEvent[]> {
   const trimmed = input.trim();
   if (!trimmed) throw new LumaFetchError("Empty input", input);
 
+  if (isLumaIcsUrl(trimmed)) {
+    return fetchLumaEventsFromIcsUrl(trimmed);
+  }
+
   const urls = parseEventUrls(trimmed);
   if (urls.length === 0) {
     throw new LumaFetchError(
-      "No Luma event URLs found. Paste one or more event URLs like https://lu.ma/abc123 — Luma profiles can't be auto-imported (their API is private).",
+      "No Luma input found. Paste either your personal calendar subscription URL (Luma → Settings → Calendar) or one or more event URLs like https://lu.ma/abc123.",
       input,
     );
   }
 
   return fetchLumaEventsFromUrls(urls);
+}
+
+export function isLumaIcsUrl(input: string): boolean {
+  try {
+    const u = new URL(input.trim());
+    return (
+      (u.hostname === "api.lu.ma" || u.hostname === "lu.ma") &&
+      u.pathname.startsWith("/ics/")
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -142,6 +157,130 @@ export async function fetchLumaEventsFromUrls(urls: string[]): Promise<LumaEvent
     throw errors[0];
   }
   return dedupeById(events);
+}
+
+/**
+ * Fetch the user's full Luma calendar (RSVPs + hosted) via their personal
+ * iCal subscription URL. The signed token in the URL acts as auth — no
+ * OAuth needed.
+ *
+ * Returns events derived from VEVENT blocks. URLs and ids come from the
+ * URL/UID properties Luma emits.
+ */
+export async function fetchLumaEventsFromIcsUrl(icsUrl: string): Promise<LumaEvent[]> {
+  let res: Response;
+  try {
+    res = await fetch(icsUrl, {
+      headers: {
+        "user-agent": UA,
+        "accept": "text/calendar, text/plain",
+      },
+      redirect: "follow",
+    });
+  } catch (err) {
+    throw new LumaFetchError(`Network error fetching iCal: ${(err as Error).message}`, icsUrl);
+  }
+  if (!res.ok) {
+    throw new LumaFetchError(
+      `iCal fetch failed (HTTP ${res.status}). Double-check the URL is your personal subscription link from Luma → Settings → Calendar.`,
+      icsUrl,
+      res.status,
+    );
+  }
+  const text = await res.text();
+  if (!text.includes("BEGIN:VCALENDAR")) {
+    throw new LumaFetchError(
+      "Response wasn't an iCal feed. The URL needs to be Luma's personal calendar subscription link.",
+      icsUrl,
+    );
+  }
+  return parseIcsToEvents(text);
+}
+
+function parseIcsToEvents(ics: string): LumaEvent[] {
+  const lines = unfoldIcsLines(ics);
+  const events: LumaEvent[] = [];
+  let current: Record<string, string> | null = null;
+  for (const line of lines) {
+    if (line === "BEGIN:VEVENT") {
+      current = {};
+    } else if (line === "END:VEVENT") {
+      if (current) {
+        const ev = icsBlockToEvent(current);
+        if (ev) events.push(ev);
+      }
+      current = null;
+    } else if (current) {
+      const sepIdx = line.indexOf(":");
+      if (sepIdx === -1) continue;
+      const left = line.slice(0, sepIdx);
+      const value = decodeIcsText(line.slice(sepIdx + 1));
+      // left can be "DTSTART;TZID=America/Los_Angeles" — strip params for key
+      const semi = left.indexOf(";");
+      const key = semi === -1 ? left : left.slice(0, semi);
+      current[key.toUpperCase()] = value;
+    }
+  }
+  return dedupeById(events);
+}
+
+function unfoldIcsLines(ics: string): string[] {
+  const raw = ics.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  for (const line of raw) {
+    if (line.length === 0) continue;
+    if ((line.startsWith(" ") || line.startsWith("\t")) && out.length > 0) {
+      out[out.length - 1] += line.slice(1);
+    } else {
+      out.push(line);
+    }
+  }
+  return out;
+}
+
+function decodeIcsText(value: string): string {
+  return value
+    .replace(/\\n/gi, "\n")
+    .replace(/\\,/g, ",")
+    .replace(/\\;/g, ";")
+    .replace(/\\\\/g, "\\");
+}
+
+function icsBlockToEvent(block: Record<string, string>): LumaEvent | null {
+  const url = block.URL ?? "";
+  const summary = block.SUMMARY ?? "";
+  const dtstart = block.DTSTART ?? "";
+  if (!summary || !dtstart) return null;
+
+  const id = block.UID ?? (url ? deriveIdFromUrl(url) : summary);
+
+  return {
+    id: String(id),
+    title: summary,
+    host: extractHostFromIcsDescription(block.DESCRIPTION ?? "") ?? "Unknown host",
+    datetime: icsDateToIso(dtstart),
+    endDatetime: block.DTEND ? icsDateToIso(block.DTEND) : undefined,
+    url: url || `${LUMA_BASE}/`,
+    description: block.DESCRIPTION,
+    location: block.LOCATION,
+    source: "luma",
+    raw: block,
+  };
+}
+
+function icsDateToIso(value: string): string {
+  // Formats: 20260530T130000Z | 20260530T130000 | 20260530
+  const m = value.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z?))?$/);
+  if (!m) return value;
+  const [, y, mo, d, hh, mm, ss, z] = m;
+  if (!hh) return `${y}-${mo}-${d}T00:00:00${z === "Z" ? "Z" : ""}`;
+  return `${y}-${mo}-${d}T${hh}:${mm}:${ss}${z === "Z" ? "Z" : ""}`;
+}
+
+function extractHostFromIcsDescription(desc: string): string | null {
+  // Luma's DESCRIPTION often contains "Hosted by <name>" early on
+  const m = desc.match(/Hosted by ([^\n]+)/i);
+  return m?.[1]?.trim() ?? null;
 }
 
 /**

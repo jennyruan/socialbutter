@@ -21,3 +21,4 @@ terminals are doing.
 - 13:52 [A] Pivoted Luma fetcher to URL-paste flow (profile API is private); organizer-array fix `736b617`.
 - 14:50 [A] Agent (rank + draft + feedback) + LLM client pushed `93b5f4f`. Awaiting scaffold + `lib/evermind.ts`.
 - 15:05 [A] Added STATUS.md + sync-hook for near-real-time coordination.
+- 15:18 [A] Luma "connect" via personal iCal subscription URL — `fetchLumaEventsFromIcsUrl` + ICS parser in `lib/luma.ts`; `fetchLumaFromInput` routes ICS-vs-URL-paste; connect UI copy leads with calendar URL.

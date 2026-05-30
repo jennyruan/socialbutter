@@ -58,13 +58,23 @@ export default function ConnectPage() {
 
       <main className="bs-main">
         <section className="bs-card bs-connect-card">
-          <h2 className="bs-section-title">Connect your Luma events</h2>
+          <h2 className="bs-section-title">Connect your Luma</h2>
           <p className="bs-help-text">
-            Paste one or more Luma event URLs — one per line, comma-separated,
-            or any mix. ButterSocial fetches each event live from{" "}
-            <code className="bs-mono">lu.ma</code>: no mock data, no auth
-            required. (Luma doesn't expose a public user-events API, so we
-            work from links rather than usernames.)
+            Paste your <strong>personal Luma calendar URL</strong> to pull
+            every event you've RSVP'd to or hosted — ButterSocial refreshes
+            on every load. Find it at{" "}
+            <a
+              href="https://lu.ma/settings/calendar"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bs-link"
+            >
+              Luma → Settings → Calendar
+            </a>{" "}
+            (look for the <code className="bs-mono">api.lu.ma/ics/...</code>
+            link). Or paste individual{" "}
+            <code className="bs-mono">lu.ma/&lt;event&gt;</code> URLs — one
+            per line. All data fetched live, no mocks.
           </p>
 
           <form onSubmit={handleImport} className="bs-form bs-form-vertical">
@@ -72,7 +82,7 @@ export default function ConnectPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={
-                "https://lu.ma/h7h9r7bw\nhttps://lu.ma/abc123\n…"
+                "https://api.lu.ma/ics/get?entity=user&id=…&token=…\n\n— or —\n\nhttps://lu.ma/h7h9r7bw\nhttps://lu.ma/abc123"
               }
               className="bs-input bs-textarea"
               disabled={loading}
@@ -85,7 +95,7 @@ export default function ConnectPage() {
               className="bs-btn-primary"
               disabled={loading || !input.trim()}
             >
-              {loading ? "Importing…" : "Import events"}
+              {loading ? "Connecting…" : "Connect Luma"}
             </button>
           </form>
 
