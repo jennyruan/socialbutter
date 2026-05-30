@@ -67,20 +67,22 @@ The solo founder / busy professional at a coworking space who:
 ## Scope (locked 2026-05-30 ~1:25pm)
 
 ### ✅ In v1
-- Paste Luma URL → fetch metadata (OG tags or pre-fetched fixtures if API blocked)
-- Evermind: write past feedback, retrieve as ranking context
-- Butterbase: persist events + attendance + intros
+- Connect Luma by username or URL → real fetch from lu.ma (no mocks)
+- Evermind: write past feedback, retrieve as ranking context (real instance)
+- Butterbase: persist events + attendance + intros (real project)
 - LLM ranking with cited reasoning
-- LLM-drafted host intro (DRAFT ONLY, not sent)
+- LLM-drafted host intro (DRAFT ONLY — not sent)
 - Single-screen UI (paste box + output card)
-- Pre-loaded real demo data (Jenny's actual past events)
+- Demo dataset = Jenny's actual past Luma events
 
 ### ❌ Cut for v1 (do not rebuild)
-- LinkedIn / Instagram / X API integration → mock in demo, roadmap slide
+- LinkedIn / Instagram / X API integration → roadmap slide (no mocks in demo)
 - Real outreach sending → live-demo risk too high
 - Follow-up auto-send → roadmap
-- Real calendar API integration → mock OK
-- Recommendation engine over a discovery feed → only rank what user pastes
+- Calendar API integration → roadmap (do not stub with fake calendar data)
+- Recommendation engine over a discovery feed → only rank what's imported
+
+**Hard rule:** no mock data anywhere. See `CLAUDE.md` §2.
 
 ---
 

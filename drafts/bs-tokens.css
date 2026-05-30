@@ -1,0 +1,290 @@
+/* ButterSocial design tokens + base components.
+ *
+ * Mirrors ~/code/experiments/amgina/app/globals.css (day theme only for v1).
+ * Class prefix is `bs-*` (ButterSocial) parallel to AMGINA's `amg-*`.
+ *
+ * Migration: paste contents into app/globals.css below the `@import "tailwindcss";`
+ * line, then delete this file.
+ */
+
+:root {
+  /* Day theme — borrowed straight from AMGINA */
+  --cream: #F5EFE0;
+  --paper: #FBF7EC;
+  --ink: #2B2B2B;
+  --amber: #D4A657;
+  --coral: #D46A6A;
+  --ochre: #B28E4E;
+  --parked: #A39890;
+
+  --bg-app: var(--cream);
+  --bg-pane: var(--paper);
+  --bg-pane-hover: #F0E8D4;
+  --bg-input: var(--paper);
+
+  --border-default: var(--ink);
+  --border-subtle: rgba(43, 43, 43, 0.18);
+
+  --text-primary: var(--ink);
+  --text-secondary: var(--ochre);
+  --text-muted: var(--parked);
+  --text-disabled: #C4B8A8;
+
+  --accent-primary: var(--amber);
+  --accent-primary-hover: #E8BC6B;
+  --accent-primary-soft: rgba(212, 166, 87, 0.18);
+  --accent-warm: var(--coral);
+  --accent-focus: #B89A4F;
+
+  --status-error: #C4534A;
+
+  --font-sans: 'LXGW WenKai Screen', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.65;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font-family: inherit; }
+input, textarea {
+  font-family: inherit;
+  color: var(--text-primary);
+  font-size: 15px;
+  background: var(--bg-pane);
+}
+input::placeholder, textarea::placeholder { color: var(--text-muted); }
+input:focus, textarea:focus { outline: 2px solid var(--accent-focus); outline-offset: -2px; }
+
+/* --- Layout --------------------------------------------------------- */
+
+.bs-page {
+  min-height: 100vh;
+  background: var(--bg-app);
+}
+
+.bs-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-app);
+  border-bottom: 2px solid var(--border-default);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bs-header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.bs-header-greeting {
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+
+.bs-header-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.bs-main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 28px 24px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* --- Cards --------------------------------------------------------- */
+
+.bs-card {
+  background: var(--bg-pane);
+  border: 2px solid var(--border-default);
+  border-radius: 0;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bs-section-title {
+  font-size: 18px;
+  font-weight: 400;
+  margin: 0;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+
+.bs-help-text {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.bs-mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* --- Connect form -------------------------------------------------- */
+
+.bs-connect-card { gap: 16px; }
+
+.bs-form {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.bs-input {
+  flex: 1 1 280px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 2px solid var(--border-default);
+  border-radius: 0;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.bs-btn-primary {
+  padding: 12px 20px;
+  background: var(--accent-primary);
+  color: var(--text-primary);
+  border: 2px solid var(--border-default);
+  border-radius: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 80ms ease, transform 60ms ease;
+}
+.bs-btn-primary:hover:not(:disabled) {
+  background: var(--accent-primary-hover);
+}
+.bs-btn-primary:active:not(:disabled) { transform: translateY(1px); }
+.bs-btn-primary:disabled {
+  background: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.bs-error {
+  margin-top: 8px;
+  padding: 12px 14px;
+  background: rgba(196, 83, 74, 0.10);
+  border: 1px solid var(--status-error);
+  color: var(--status-error);
+  font-size: 14px;
+}
+
+/* --- Events list --------------------------------------------------- */
+
+.bs-events-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.bs-events-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bs-events-source {
+  color: var(--text-muted);
+}
+
+.bs-event-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.bs-event-card {
+  padding: 18px;
+  gap: 8px;
+}
+
+.bs-event-when {
+  color: var(--text-secondary);
+}
+
+.bs-event-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.bs-event-host {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.bs-event-location {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.bs-link {
+  margin-top: 4px;
+  color: var(--accent-primary);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-bottom: 1px dashed transparent;
+  align-self: flex-start;
+}
+.bs-link:hover {
+  border-bottom-color: var(--accent-primary);
+}
+
+.bs-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+  border: 1px dashed var(--border-subtle);
+  font-size: 14px;
+}
+
+/* --- Mobile -------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .bs-header { padding: 12px 16px; }
+  .bs-main { padding: 18px 16px 80px; }
+  .bs-header-greeting { font-size: 19px; }
+  .bs-event-grid { grid-template-columns: 1fr; }
+}
