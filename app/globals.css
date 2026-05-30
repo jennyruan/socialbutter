@@ -334,6 +334,238 @@ input:focus, textarea:focus { outline: 2px solid var(--accent-focus); outline-of
 .sb-source-google { background: rgba(212, 106, 106, 0.18); }
 .sb-source-ics    { background: rgba(43, 43, 43, 0.04); }
 
+/* --- Source toggle (X / LinkedIn picker) --------------------------- */
+
+.sb-toggle {
+  display: inline-flex;
+  border: 2px solid var(--border-default);
+  align-self: flex-start;
+  background: var(--bg-app);
+}
+.sb-toggle-btn {
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  transition: background 80ms ease, color 80ms ease;
+}
+.sb-toggle-btn + .sb-toggle-btn { border-left: 2px solid var(--border-default); }
+.sb-toggle-btn:hover { color: var(--text-primary); background: var(--bg-pane-hover); }
+.sb-toggle-active { background: var(--accent-primary); color: var(--text-primary); }
+.sb-toggle-active:hover { background: var(--accent-primary-hover); }
+
+/* --- Source pill (small badge on cards) --------------------------- */
+
+.sb-source-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  background: var(--accent-primary-soft);
+  border: 1px solid var(--accent-primary);
+  border-radius: 0;
+}
+.sb-verdict-pill-go    { background: rgba(122, 154, 107, 0.18); border-color: #7A9A6B; }
+.sb-verdict-pill-skip  { background: rgba(196, 83, 74, 0.16); border-color: #C4534A; }
+.sb-verdict-pill-maybe { background: rgba(212, 180, 87, 0.18); border-color: #D4B457; }
+
+/* --- Event card description text ---------------------------------- */
+
+.sb-event-desc {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  opacity: 0.85;
+}
+
+/* --- "Rank with Evermind" bar ------------------------------------- */
+
+.sb-rank-bar {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  flex-wrap: wrap;
+  padding: 14px;
+  background: var(--bg-pane);
+  border: 2px solid var(--border-default);
+}
+.sb-rank-goal { flex: 1 1 280px; min-width: 0; }
+
+/* --- Verdict overlay around event cards --------------------------- */
+
+.sb-verdict-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.sb-verdict-wrap > .sb-event-card { flex: 1 1 auto; }
+.sb-verdict-badge {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  z-index: 2;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  border: 2px solid var(--border-default);
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+.sb-verdict-go    .sb-verdict-badge { background: #7A9A6B; color: var(--bg-pane); }
+.sb-verdict-skip  .sb-verdict-badge { background: #C4534A; color: var(--bg-pane); }
+.sb-verdict-maybe .sb-verdict-badge { background: #D4B457; color: var(--text-primary); }
+
+.sb-verdict-go    > .sb-event-card { border-color: #7A9A6B; }
+.sb-verdict-skip  > .sb-event-card { border-color: #C4534A; opacity: 0.85; }
+.sb-verdict-maybe > .sb-event-card { border-color: #D4B457; }
+
+.sb-verdict-reason {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--accent-primary-soft);
+  border: 1px solid var(--accent-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.sb-verdict-cites {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* --- Person card additions ---------------------------------------- */
+
+.sb-person-card { padding: 22px; gap: 12px; }
+.sb-person-header { display: flex; gap: 14px; align-items: center; }
+.sb-person-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 0;
+  border: 2px solid var(--border-default);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.sb-person-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.sb-person-headline {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.sb-person-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.sb-person-posts {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-subtle);
+}
+.sb-person-post {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg-app);
+  border-left: 2px solid var(--accent-primary);
+}
+.sb-person-post p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-primary); }
+.sb-person-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* --- Draft box (intro DM editor) ---------------------------------- */
+
+.sb-draft-box {
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--bg-app);
+  border: 1px dashed var(--border-default);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* --- Attendees panel (Luma) --------------------------------------- */
+
+.sb-attendees-panel {
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--bg-app);
+  border: 1px dashed var(--border-default);
+}
+.sb-attendees-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sb-attendee {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px;
+  background: var(--bg-pane);
+  border: 1px solid var(--border-subtle);
+}
+.sb-attendee-go    { border-left: 3px solid #7A9A6B; }
+.sb-attendee-skip  { border-left: 3px solid #C4534A; opacity: 0.85; }
+.sb-attendee-maybe { border-left: 3px solid #D4B457; }
+.sb-attendee-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 0;
+  border: 1px solid var(--border-default);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.sb-attendee-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sb-attendee-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sb-attendee-reason {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
 @media (max-width: 640px) {
   .sb-header { padding: 12px 16px; }
   .sb-main { padding: 18px 16px 80px; }

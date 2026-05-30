@@ -394,6 +394,104 @@ export async function findPersonOnLinkedIn(input: string): Promise<DiscoveredPer
   }
 }
 
+// --- Luma attendees (guest list) ------------------------------------------
+
+/**
+ * Scrape the guest list off a public Luma event page.
+ *
+ * Loads the page in the persistent browser, expands the guest list panel
+ * if present, and pulls names + avatar URLs. Returns DiscoveredPerson[]
+ * with source="x" placeholder (Luma isn't a SocialSource — the agent
+ * downstream treats these as ranking inputs by name + headline).
+ *
+ * Throws if the event has no public guest list (Luma allows hosts to hide it).
+ */
+export async function findLumaEventAttendees(
+  eventUrl: string,
+  opts: { limit?: number } = {},
+): Promise<DiscoveredPerson[]> {
+  const ctx = await getBrowserContext();
+  const page = await ctx.newPage();
+  try {
+    await page.goto(eventUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await page.waitForTimeout(900);
+
+    // The guest list panel typically has a "See all" button when there are >N guests.
+    const seeAll = page.locator(
+      "button:has-text('See all'), button:has-text('See guests'), a:has-text('See all')",
+    ).first();
+    if (await seeAll.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await seeAll.click().catch(() => {});
+      await page.waitForTimeout(900);
+    }
+
+    // Scroll to load more
+    await page.mouse.wheel(0, 1_400);
+    await page.waitForTimeout(500);
+
+    const guests = await page.evaluate((limit) => {
+      // Luma uses links to /user/<slug> for guests; capture them with their avatar + alt text
+      const anchors = Array.from(
+        document.querySelectorAll(
+          "a[href*='/user/'], a[href^='/u/']",
+        ),
+      ) as HTMLAnchorElement[];
+
+      const seen = new Set<string>();
+      const out: Array<Record<string, unknown>> = [];
+
+      for (const a of anchors) {
+        const href = a.href.split("?")[0];
+        if (!/\/(user|u)\//.test(href)) continue;
+        if (seen.has(href)) continue;
+        seen.add(href);
+
+        const slug = href.split("/").filter(Boolean).pop() ?? "";
+        const img = a.querySelector("img") as HTMLImageElement | null;
+        // Name candidates: alt text on avatar, then anchor text, then slug
+        const name =
+          (img?.alt && img.alt.trim()) ||
+          (a.innerText && a.innerText.trim()) ||
+          slug;
+
+        out.push({
+          handle: slug,
+          url: href,
+          name: name.replace(/\s+/g, " ").slice(0, 80),
+          avatarUrl: img?.src,
+        });
+        if (out.length >= limit) break;
+      }
+      return out;
+    }, opts.limit ?? 24);
+
+    if (guests.length === 0) {
+      throw new SocialSearchError(
+        "No public guest list found on this Luma event (host may have it hidden).",
+        "x", // placeholder — Luma isn't a SocialSource literal
+        "selector_broken",
+      );
+    }
+
+    return guests.map((g) => ({
+      source: "x" as const, // placeholder; consumers should look at handle/url
+      handle: String(g.handle ?? ""),
+      url: String(g.url ?? ""),
+      name: String(g.name ?? ""),
+      avatarUrl: g.avatarUrl as string | undefined,
+    }));
+  } catch (err) {
+    if (err instanceof SocialSearchError) throw err;
+    throw new SocialSearchError(
+      `Luma attendee scrape failed: ${(err as Error).message}`,
+      "x",
+      "selector_broken",
+    );
+  } finally {
+    await page.close();
+  }
+}
+
 // --- Helpers --------------------------------------------------------------
 
 function normalizeXHandle(input: string): string {
