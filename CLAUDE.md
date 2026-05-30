@@ -114,7 +114,38 @@ buttersocial/
 
 ---
 
-## 6. Submission checklist (4:00pm hard deadline)
+## 6. Sync ritual (read this every turn)
+
+3 Claude Code terminals are running in parallel. Conversation context
+never crosses terminals; only files + git do. To stay current:
+
+**At the start of every turn in this project, run:**
+```bash
+bash .claude/sync-hook.sh
+```
+
+This script auto-fetches `origin/main`, fast-forwards if you're clean and
+behind, then prints `STATUS.md` tail + recent `git log` + any uncommitted
+files. Output goes into your context.
+
+**After every meaningful action** (commit, decision, blocker, handoff),
+append one line to `STATUS.md` and push immediately:
+```
+- HH:MM [tag] short description — files or commit short-sha
+```
+
+Pick a `tag` at session start (A, B, C, or a topic like "luma", "scaffold")
+and keep using it.
+
+**Optional auto-fire:** if Jenny enables the UserPromptSubmit hook
+(`docs/sync-protocol.md` has the JSON), the script fires automatically
+every prompt — closest to real-time the harness allows.
+
+See `docs/sync-protocol.md` for details and conflict handling.
+
+---
+
+## 7. Submission checklist (4:00pm hard deadline)
 
 - [ ] App running locally and screencast-able
 - [ ] Evermind memory retrieval visible in demo flow

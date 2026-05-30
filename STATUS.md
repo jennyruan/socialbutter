@@ -1,0 +1,23 @@
+# STATUS — multi-terminal heartbeat
+
+Append a line after every meaningful action (commit, decision, blocker, hand-off).
+Read the tail of this file at the start of every turn to see what other
+terminals are doing.
+
+## Protocol
+
+- Format: `- HH:MM [tag] action — files or commit short-sha`
+- `tag` is whatever identifies this terminal: A / B / C, or a topic
+  ("luma", "evermind", "scaffold"). Pick at start of session, stick with it.
+- **Append-only.** Don't edit past lines.
+- **Push immediately** after appending so others see it.
+- Heartbeat at least every 15 min even if just "still on X".
+
+## Log
+
+- 13:34 [A] Init: README + first commit `e1bb56d`, GitHub repo created (`jennyruan/buttersocial`, public).
+- 13:43 [A] CLAUDE.md (project rules) + Luma fetcher + drafts/ (UI, CSS, route) pushed `a963508`.
+- 13:43 [B] Added `.mcp.json` (Butterbase MCP) + `scripts/evermind-smoke.mjs` (API validation).
+- 13:52 [A] Pivoted Luma fetcher to URL-paste flow (profile API is private); organizer-array fix `736b617`.
+- 14:50 [A] Agent (rank + draft + feedback) + LLM client pushed `93b5f4f`. Awaiting scaffold + `lib/evermind.ts`.
+- 15:05 [A] Added STATUS.md + sync-hook for near-real-time coordination.
