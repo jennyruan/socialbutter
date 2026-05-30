@@ -197,6 +197,29 @@ input:focus, textarea:focus { outline: 2px solid var(--accent-focus); outline-of
 .sb-btn-primary:active:not(:disabled) { transform: translateY(1px); }
 .sb-btn-primary:disabled { background: var(--text-disabled); cursor: not-allowed; }
 
+.sb-btn-secondary {
+  padding: 10px 16px;
+  background: var(--bg-pane);
+  color: var(--text-primary);
+  border: 2px solid var(--border-default);
+  border-radius: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 80ms ease, transform 60ms ease;
+}
+.sb-btn-secondary:hover:not(:disabled) { background: var(--accent-primary-soft); }
+.sb-btn-secondary:active:not(:disabled) { transform: translateY(1px); }
+.sb-btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sb-auto-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 18px;
+}
+
 .sb-error {
   margin-top: 8px;
   padding: 12px 14px;

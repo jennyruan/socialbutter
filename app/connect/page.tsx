@@ -10,6 +10,31 @@ export default function ConnectPage() {
   const [error, setError] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<Array<{ url: string; message: string }>>([]);
   const [importedFrom, setImportedFrom] = useState<string | null>(null);
+  const [autoBusy, setAutoBusy] = useState<null | "luma" | "google" | "apple">(null);
+
+  async function handleAutoConnect(source: "luma" | "google" | "apple") {
+    setAutoBusy(source);
+    setError(null);
+    setImportErrors([]);
+    try {
+      const res = await fetch("/api/calendar/auto-connect", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? `Auto-connect failed (HTTP ${res.status})`);
+      }
+      setEvents((prev) => mergeCalendarEvents(prev, data.events ?? []));
+      setImportedFrom(`${labelForSource(source)} (auto)`);
+      if (data.url) setInput(data.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAutoBusy(null);
+    }
+  }
 
   async function handleImport(e: React.FormEvent) {
     e.preventDefault();
@@ -58,10 +83,36 @@ export default function ConnectPage() {
         <section className="sb-card sb-connect-card">
           <h2 className="sb-section-title">Connect your calendars</h2>
           <p className="sb-help-text">
-            Paste any combination of subscription URLs below — Apple, Google,
-            Luma, or individual Luma event URLs. SocialButter pulls live on
-            every load. No mocks.
+            One click — agent signs in for you and grabs the subscription
+            link. Or paste your own URLs below.
           </p>
+
+          <div className="sb-auto-row">
+            <button
+              type="button"
+              className="sb-btn-secondary"
+              onClick={() => handleAutoConnect("luma")}
+              disabled={autoBusy !== null}
+            >
+              {autoBusy === "luma" ? "Connecting Luma…" : "Connect Luma"}
+            </button>
+            <button
+              type="button"
+              className="sb-btn-secondary"
+              onClick={() => handleAutoConnect("google")}
+              disabled={autoBusy !== null}
+            >
+              {autoBusy === "google" ? "Connecting Google…" : "Connect Google"}
+            </button>
+            <button
+              type="button"
+              className="sb-btn-secondary"
+              onClick={() => handleAutoConnect("apple")}
+              disabled={autoBusy !== null}
+            >
+              {autoBusy === "apple" ? "Connecting Apple…" : "Connect Apple"}
+            </button>
+          </div>
 
           <ul className="sb-source-list">
             <li>
@@ -208,6 +259,22 @@ function countBySource(events: CalendarEvent[]): Array<{ label: string; count: n
   const counts = new Map<string, number>();
   for (const e of events) counts.set(e.sourceLabel, (counts.get(e.sourceLabel) ?? 0) + 1);
   return Array.from(counts.entries()).map(([label, count]) => ({ label, count }));
+}
+
+function labelForSource(s: "luma" | "google" | "apple"): string {
+  return s === "luma" ? "Luma" : s === "google" ? "Google Calendar" : "Apple Calendar";
+}
+
+function mergeCalendarEvents(prev: CalendarEvent[], incoming: CalendarEvent[]): CalendarEvent[] {
+  const seen = new Set(prev.map((e) => e.id));
+  const out = [...prev];
+  for (const e of incoming) {
+    if (!seen.has(e.id)) {
+      out.push(e);
+      seen.add(e.id);
+    }
+  }
+  return out;
 }
 
 function formatWhen(iso: string): string {

@@ -209,6 +209,154 @@ export async function linkedinConnect(profileUrl: string, note?: string): Promis
   }
 }
 
+// --- Calendar subscription extractors --------------------------------------
+//
+// Each of these navigates the user's signed-in account to the "share / copy
+// subscription URL" affordance and returns the URL. Caller pipes that URL
+// into /api/calendar/import so events flow into SocialButter.
+//
+// Persistent profile must already be signed into each service. Run
+// scripts/browser-agent-setup.mjs once to log in.
+
+export interface SubscriptionExtractResult extends BrowserActionResult {
+  url?: string;
+}
+
+/**
+ * Extract the user's personal Luma iCal subscription URL by visiting
+ * lu.ma/settings/calendar.
+ */
+export async function extractLumaSubscriptionUrl(): Promise<SubscriptionExtractResult> {
+  const startedAt = new Date().toISOString();
+  const ctx = await getBrowserContext();
+  const page = await ctx.newPage();
+  try {
+    await page.goto("https://lu.ma/settings/calendar", { waitUntil: "domcontentloaded" });
+    await humanWait(1_500, 2_500);
+
+    if (page.url().includes("/signin") || page.url().includes("/login")) {
+      return finalize(false, "extract_luma_url", "https://lu.ma/settings/calendar", startedAt, "Not signed into Luma — run setup once");
+    }
+
+    // The URL is usually inside an <input> or visible as a code/link element.
+    // Try several strategies.
+    const candidate = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll<HTMLElement>("input, code, a, span"));
+      for (const el of all) {
+        const text = (el as HTMLInputElement).value ?? el.textContent ?? "";
+        const match = text.match(/https:\/\/api\.lu\.ma\/ics\/[^\s"'<>]+/);
+        if (match) return match[0];
+      }
+      return null;
+    });
+
+    if (!candidate) {
+      return finalize(false, "extract_luma_url", "https://lu.ma/settings/calendar", startedAt, "Subscription URL not found on Luma settings page (DOM may have changed)");
+    }
+
+    return { ...finalize(true, "extract_luma_url", "https://lu.ma/settings/calendar", startedAt), url: candidate };
+  } finally {
+    await page.close();
+  }
+}
+
+/**
+ * Extract a Google Calendar iCal subscription URL ("Secret address in iCal
+ * format") for the primary calendar — or for the calendar whose name matches
+ * `calendarName`. Navigates calendar.google.com/calendar/u/0/r/settings.
+ */
+export async function extractGoogleCalendarSubscriptionUrl(calendarName?: string): Promise<SubscriptionExtractResult> {
+  const startedAt = new Date().toISOString();
+  const ctx = await getBrowserContext();
+  const page = await ctx.newPage();
+  const target = "https://calendar.google.com/calendar/u/0/r/settings";
+  try {
+    await page.goto(target, { waitUntil: "domcontentloaded" });
+    await humanWait(2_000, 3_500);
+
+    if (page.url().includes("accounts.google.com")) {
+      return finalize(false, "extract_google_url", target, startedAt, "Not signed into Google — run setup once");
+    }
+
+    // The settings page lists calendars in a sidebar. Click the named one
+    // (or the first owned calendar) to open its detail panel which has
+    // "Integrate calendar" → "Secret address in iCal format".
+    if (calendarName) {
+      const link = page.locator(`a:has-text("${calendarName}")`).first();
+      if (await link.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await link.click();
+        await humanWait(800, 1_500);
+      }
+    }
+
+    // Scroll to find the "Secret address in iCal format" section
+    await humanScroll(page, 1_200);
+
+    const candidate = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll<HTMLElement>("input, code, a, div, span"));
+      for (const el of all) {
+        const text = (el as HTMLInputElement).value ?? el.textContent ?? "";
+        const match = text.match(/https:\/\/calendar\.google\.com\/calendar\/ical\/[^\s"'<>]+/);
+        if (match) return match[0];
+      }
+      return null;
+    });
+
+    if (!candidate) {
+      return finalize(false, "extract_google_url", target, startedAt, "Secret iCal address not found — calendar may not be selected or DOM changed");
+    }
+
+    return { ...finalize(true, "extract_google_url", target, startedAt), url: candidate };
+  } finally {
+    await page.close();
+  }
+}
+
+/**
+ * Extract an Apple iCloud calendar public webcal:// URL. Requires the user
+ * to have ALREADY made the calendar public (or, optionally, this function
+ * toggles it on — disabled by default since it changes user state).
+ */
+export async function extractAppleCalendarSubscriptionUrl(calendarName?: string): Promise<SubscriptionExtractResult> {
+  const startedAt = new Date().toISOString();
+  const ctx = await getBrowserContext();
+  const page = await ctx.newPage();
+  const target = "https://www.icloud.com/calendar/";
+  try {
+    await page.goto(target, { waitUntil: "domcontentloaded" });
+    await humanWait(3_000, 5_000);
+
+    if (page.url().includes("appleid.apple.com") || page.url().includes("/signin")) {
+      return finalize(false, "extract_apple_url", target, startedAt, "Not signed into iCloud — run setup once. 2FA may also be required.");
+    }
+
+    // iCloud's calendar app is heavily Shadow-DOM'd and SPA-rendered. The
+    // share affordance lives in a popover off the calendar's context menu.
+    // We try a "look for any webcal:// URL in the entire frame tree" pass —
+    // if the user has previously made a calendar public, the URL is
+    // accessible somewhere in the DOM.
+    await humanWait(2_000, 4_000);
+    const candidate = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll<HTMLElement>("input, code, a, span, div"));
+      for (const el of all) {
+        const text = (el as HTMLInputElement).value ?? el.textContent ?? "";
+        const match = text.match(/webcal:\/\/[^\s"'<>]+/);
+        if (match) return match[0];
+      }
+      return null;
+    });
+
+    if (!candidate) {
+      return finalize(false, "extract_apple_url", target, startedAt, "Public webcal:// URL not found. iCloud Calendar needs the calendar to be shared publicly first — agent can't toggle that safely. Open Calendar app → right-click calendar → Share → Public, then retry.");
+    }
+
+    void calendarName;
+    return { ...finalize(true, "extract_apple_url", target, startedAt), url: candidate };
+  } finally {
+    await page.close();
+  }
+}
+
 // --- Backstage queue runner -----------------------------------------------
 
 export interface QueuedAction {
