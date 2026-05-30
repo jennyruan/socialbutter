@@ -44,6 +44,29 @@ function ConnectLumaSection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importedFrom, setImportedFrom] = useState<string | null>(null);
+  const [autoBusy, setAutoBusy] = useState<null | "luma" | "google" | "apple">(null);
+  const [autoStatus, setAutoStatus] = useState<{ source: string; count: number; url: string } | null>(null);
+
+  async function handleAutoConnect(source: "luma" | "google" | "apple") {
+    setAutoBusy(source);
+    setError(null);
+    setAutoStatus(null);
+    try {
+      const res = await fetch("/api/calendar/auto-connect", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `Auto-connect failed (HTTP ${res.status})`);
+      setAutoStatus({ source, count: data.count ?? data.events?.length ?? 0, url: data.url });
+      if (data.url) setInput(data.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAutoBusy(null);
+    }
+  }
 
   async function handleImport(e: React.FormEvent) {
     e.preventDefault();
@@ -89,6 +112,24 @@ function ConnectLumaSection() {
           paste individual <code className="sb-mono">lu.ma/&lt;event&gt;</code>{" "}
           URLs — one per line. All data fetched live, no mocks.
         </p>
+
+        <div className="sb-auto-row">
+          <button type="button" className="sb-btn-secondary" onClick={() => handleAutoConnect("luma")} disabled={autoBusy !== null}>
+            {autoBusy === "luma" ? "Connecting Luma…" : "⚡ Connect Luma"}
+          </button>
+          <button type="button" className="sb-btn-secondary" onClick={() => handleAutoConnect("google")} disabled={autoBusy !== null}>
+            {autoBusy === "google" ? "Connecting Google…" : "⚡ Connect Google"}
+          </button>
+          <button type="button" className="sb-btn-secondary" onClick={() => handleAutoConnect("apple")} disabled={autoBusy !== null}>
+            {autoBusy === "apple" ? "Connecting Apple…" : "⚡ Connect Apple"}
+          </button>
+        </div>
+        {autoStatus && (
+          <div className="sb-help-text">
+            ✓ Agent grabbed your {autoStatus.source} calendar URL — {autoStatus.count} events. Click Connect Luma below to load them.
+          </div>
+        )}
+
         <form onSubmit={handleImport} className="sb-form sb-form-vertical">
           <textarea
             value={input}
