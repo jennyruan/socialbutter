@@ -539,7 +539,17 @@ export async function extractOwnXProfile(): Promise<OwnXProfile> {
   const ctx = await getBrowserContext();
   const page = await ctx.newPage();
   try {
-    await page.goto("https://x.com/home", { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await page.goto("https://x.com/home", { waitUntil: "domcontentloaded", timeout: 20_000 });
+
+    // Catch login redirects (X uses several URL shapes for the auth wall)
+    const url = page.url();
+    if (url.includes("/i/flow/login") || url.includes("/login") || url.includes("/signin") || url.includes("/i/flow/signup")) {
+      throw new SocialSearchError(
+        `X is not logged in (redirected to ${url}). Run \`node scripts/browser-agent-setup.mjs\` and sign into X.`,
+        "x",
+        "not_logged_in",
+      );
+    }
     if (await isXLoggedOut(page)) {
       throw new SocialSearchError(
         "X is not logged in. Run `node scripts/browser-agent-setup.mjs` and sign in.",
@@ -548,7 +558,19 @@ export async function extractOwnXProfile(): Promise<OwnXProfile> {
       );
     }
 
-    await page.waitForSelector("[data-testid='primaryColumn']", { timeout: 10_000 });
+    // Wait for ANY of the logged-in layout markers (X has rolled the DOM a few times)
+    const ready = await Promise.race([
+      page.waitForSelector("[data-testid='primaryColumn']", { timeout: 20_000 }).then(() => "primaryColumn").catch(() => null),
+      page.waitForSelector("a[data-testid='AppTabBar_Profile_Link']", { timeout: 20_000 }).then(() => "profileLink").catch(() => null),
+      page.waitForSelector("main[role='main']", { timeout: 20_000 }).then(() => "mainRole").catch(() => null),
+    ]);
+    if (!ready) {
+      throw new SocialSearchError(
+        `X home feed didn't render in 20s (URL: ${page.url()}). Could be an interstitial (verify-it's-you, age gate, rate limit). Try opening x.com in the agent browser via setup script.`,
+        "x",
+        "selector_broken",
+      );
+    }
     await page.waitForTimeout(800);
 
     // Find own handle from the profile nav link (href is /<handle>)
