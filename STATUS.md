@@ -23,3 +23,4 @@ terminals are doing.
 - 15:05 [A] Added STATUS.md + sync-hook for near-real-time coordination.
 - 15:18 [A] Luma "connect" via personal iCal subscription URL — `fetchLumaEventsFromIcsUrl` + ICS parser in `lib/luma.ts`; `fetchLumaFromInput` routes ICS-vs-URL-paste; connect UI copy leads with calendar URL.
 - 15:25 [A-opus] Verified Evermind LIVE — `scripts/evermind-smoke.mjs` write=202 search=200. Wrote `lib/evermind.ts` (HttpEvermindClient) implementing `EvermindClient`. ⚠️ Writes are async — pre-seed memories minutes before demo, don't seed live.
+- 15:37 [A-opus] Scaffolded Next.js 15 + React 19 by hand. App is LIVE on http://localhost:3000/connect — `/api/luma/import` returns real today's-hackathon-event JSON (verified). Added .gitignore for `.next/`, `node_modules/`, `.env*`, `/.claude/settings.json`, `/seed/feedback.json`.

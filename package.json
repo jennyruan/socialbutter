@@ -1,0 +1,25 @@
+{
+  "name": "buttersocial",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent that picks events worth a busy professional's time. Beta Fund x Evermind hackathon 2026-05-30.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "evermind:smoke": "node scripts/evermind-smoke.mjs"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "dependencies": {
+    "next": "15.0.3",
+    "react": "19.0.0-rc-66855b96-20241106",
+    "react-dom": "19.0.0-rc-66855b96-20241106",
+    "playwright": "^1.60.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  }
+}
