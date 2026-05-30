@@ -12,14 +12,15 @@
   "packageManager": "pnpm@10.33.0",
   "dependencies": {
     "next": "15.0.3",
+    "playwright": "^1.60.0",
     "react": "19.0.0-rc-66855b96-20241106",
-    "react-dom": "19.0.0-rc-66855b96-20241106",
-    "playwright": "^1.60.0"
+    "react-dom": "19.0.0-rc-66855b96-20241106"
   },
   "devDependencies": {
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "tsx": "^4.22.3",
     "typescript": "^5"
   }
 }
