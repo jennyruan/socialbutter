@@ -104,6 +104,26 @@ input:focus, textarea:focus { outline: 2px solid var(--accent-focus); outline-of
   color: var(--text-muted);
 }
 
+.sb-powered-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.sb-powered-label { color: var(--text-muted); }
+.sb-powered-sep   { color: var(--text-muted); font-weight: 400; }
+.sb-powered-brand {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px dashed transparent;
+  padding-bottom: 1px;
+}
+.sb-powered-brand:hover { border-bottom-color: var(--accent-primary); }
+
 .sb-main {
   max-width: 960px;
   margin: 0 auto;

@@ -77,6 +77,26 @@ export default function ConnectPage() {
             Pick the events worth your time
           </span>
         </div>
+        <div className="sb-powered-row" aria-label="Powered by">
+          <span className="sb-powered-label">Powered by</span>
+          <a
+            href="https://evermind.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="sb-powered-brand"
+          >
+            EverMind
+          </a>
+          <span className="sb-powered-sep" aria-hidden="true">+</span>
+          <a
+            href="https://butterbase.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="sb-powered-brand"
+          >
+            Butterbase
+          </a>
+        </div>
       </header>
 
       <main className="sb-main">
