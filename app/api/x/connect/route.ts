@@ -10,8 +10,12 @@
 
 import { NextResponse } from "next/server";
 import { extractOwnXProfile, SocialSearchError } from "@/lib/social-search";
+import { localOnlyGuard } from "@/lib/local-only";
 
 export async function POST() {
+  const guard = localOnlyGuard("/api/x/connect");
+  if (guard) return guard;
+
   try {
     const data = await extractOwnXProfile();
     return NextResponse.json(data);

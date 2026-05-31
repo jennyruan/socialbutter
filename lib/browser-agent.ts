@@ -16,7 +16,7 @@
 // No mock data (CLAUDE.md §2). If a selector breaks, surface the failure;
 // never fake a success.
 
-import { chromium, type BrowserContext, type Page } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -49,6 +49,7 @@ export async function getBrowserContext(options: { headless?: boolean } = {}): P
   if (sharedContext) return sharedContext;
 
   const headless = options.headless ?? true;
+  const { chromium } = await import("playwright");
   sharedContext = await chromium.launchPersistentContext(PROFILE_DIR, {
     headless,
     channel: "chrome",
