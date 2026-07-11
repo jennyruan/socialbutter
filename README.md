@@ -6,6 +6,8 @@ Built for **Beta Fund × Evermind "One Person Company" Hackathon**, San Francisc
 
 ---
 
+**Architecture map:** [docs/PROJECT-MAP.md](docs/PROJECT-MAP.md) — what's built, what's partial, what's planned, with diagrams.
+
 ## Why
 
 Solo founders and busy professionals get 5–15 event invites a week. They can't tell which are worth their time. Time IS the company. Most existing tools are calendar-passive; we want an agent that ranks, drafts intros, and learns from feedback.
