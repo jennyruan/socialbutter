@@ -461,6 +461,21 @@ async function main() {
     assert.ok(DECISIONS.has(it.decision) && Number.isInteger(it.score), "still well-formed");
   });
 
+  // A29 — a valid http(s) url longer than 2048 chars is capped server-side.
+  await check("A29 oversized http(s) url ⇒ capped at 2048 chars", async () => {
+    const longUrl = "https://example.com/" + "a".repeat(3000);
+    const { status, data } = await callJson({
+      events: [{ id: "paste-0", title: "Long URL", url: longUrl }],
+      heuristicOnly: true,
+    });
+    assert.equal(status, 200);
+    assert.ok(
+      data.ranked[0].event.url.length <= 2048,
+      `url must be capped at 2048, got ${data.ranked[0].event.url.length}`,
+    );
+    assert.ok(data.ranked[0].event.url.startsWith("https://example.com/"), "scheme/host preserved");
+  });
+
   console.log(`\nrank-smoke: ${passed} checks passed`);
 }
 

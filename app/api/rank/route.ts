@@ -114,7 +114,7 @@ function normalizeEvent(raw: unknown): { event: RankableEvent } | { error: strin
   const event: RankableEvent = {
     id,
     title: truncate(title, CAP_TITLE),
-    url: normalizeUrl(raw.url), // scheme-checked server-side → "" if unsafe
+    url: truncate(normalizeUrl(raw.url), CAP_URL), // scheme-checked → "" if unsafe; capped at 2048
   };
   const host = optString(raw.host, CAP_SHORT);
   if (host !== undefined) event.host = host;
