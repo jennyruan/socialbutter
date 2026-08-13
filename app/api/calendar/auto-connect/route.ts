@@ -17,10 +17,14 @@ import {
   type SubscriptionExtractResult,
 } from "@/lib/browser-agent";
 import { fetchCalendarFromUrl } from "@/lib/calendar";
+import { localOnlyGuard } from "@/lib/local-only";
 
 type Source = "luma" | "google" | "apple";
 
 export async function POST(req: Request) {
+  const guard = localOnlyGuard("/api/calendar/auto-connect");
+  if (guard) return guard;
+
   let body: { source?: Source; calendarName?: string };
   try {
     body = await req.json();

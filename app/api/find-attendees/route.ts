@@ -3,12 +3,16 @@ import { findLumaEventAttendees, SocialSearchError } from "@/lib/social-search";
 import { rankPeople, type RankableEvent, type RankablePerson } from "@/lib/agent";
 import { getEvermind } from "@/lib/evermind";
 import { getLLM } from "@/lib/llm";
+import { localOnlyGuard } from "@/lib/local-only";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
+  const guard = localOnlyGuard("/api/find-attendees");
+  if (guard) return guard;
+
   let body: {
     eventUrl?: string;
     limit?: number;

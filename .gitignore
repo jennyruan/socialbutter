@@ -40,3 +40,4 @@ yarn-error.log*
 
 # real-data fixtures (gitignored to keep secrets/PII out)
 /seed/feedback.json
+.vercel

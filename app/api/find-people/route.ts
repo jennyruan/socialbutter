@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { findPerson, SocialSearchError, type SocialSource } from "@/lib/social-search";
+import { localOnlyGuard } from "@/lib/local-only";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,6 +9,9 @@ export const maxDuration = 60;
 const ALLOWED: SocialSource[] = ["x", "linkedin"];
 
 export async function POST(req: Request) {
+  const guard = localOnlyGuard("/api/find-people");
+  if (guard) return guard;
+
   let body: { source?: string; input?: string };
   try {
     body = await req.json();
