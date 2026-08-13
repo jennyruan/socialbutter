@@ -19,6 +19,9 @@ import { execSync } from "node:child_process";
 import { renderToStaticMarkup } from "react-dom/server";
 import { POST } from "../app/api/rank/route";
 import { RankCard, type RankCardItem } from "../app/rank/RankCard";
+import { parsePastedEvents } from "../app/rank/parse";
+
+const DECISIONS = new Set(["go", "maybe", "skip"]);
 
 let passed = 0;
 async function check(name: string, fn: () => void | Promise<void>) {
@@ -218,6 +221,229 @@ async function main() {
     assert.ok(!html.includes("<script>alert(1)</script>"), "no live <script> element");
     assert.ok(!html.includes('href="javascript:'), "javascript: never becomes an href");
     assert.ok(!/onerror=/.test(html) || html.includes("&lt;img"), "location must be escaped");
+  });
+
+  // ---------------------------------------------------------------------
+  // Broadened per-assertion coverage (A03–A29). Black-box against the REAL
+  // route + REAL card + REAL parser so a code-running Evaluator can verify
+  // without playwright.
+  // ---------------------------------------------------------------------
+
+  // A03/A04/A05/A06 — extended shape, decision domain, score, pros/cons.
+  await check("A03/A04/A05/A06 response shape: event+verdict+decision/score/pros/cons", async () => {
+    const { status, data } = await callJson({
+      events: [{ id: "paste-0", title: "AI Infra Dinner", url: "" }],
+      enrichment: { "paste-0": { attendeeCount: 200 } },
+      heuristicOnly: true,
+    });
+    assert.equal(status, 200);
+    assert.equal(data.rankingSource, "heuristic");
+    const item = data.ranked[0];
+    // A03: preserved + added keys all present.
+    assert.ok(item.event && item.verdict, "event + verdict preserved");
+    assert.ok(typeof item.verdict.decision === "string", "verdict.decision present");
+    assert.ok(Array.isArray(item.verdict.citationMemoryIds), "verdict.citationMemoryIds present");
+    // A04: decision domain + equals verdict.decision.
+    assert.ok(DECISIONS.has(item.decision), "decision in {go,maybe,skip}");
+    assert.equal(item.decision, item.verdict.decision, "decision equals verdict.decision");
+    // A05: heuristic score integer in [0,100].
+    assert.ok(Number.isInteger(item.score) && item.score >= 0 && item.score <= 100, "score int [0,100]");
+    // A06: pros + cons arrays, union non-empty.
+    assert.ok(Array.isArray(item.pros) && Array.isArray(item.cons), "pros/cons arrays");
+    assert.ok(item.pros.length + item.cons.length > 0, "pros∪cons non-empty");
+  });
+
+  // A07 — go has ≥1 pros, skip has ≥1 cons. A08 — pros/cons share no string.
+  await check("A07/A08 go⇒≥1 pro, skip⇒≥1 con, pros∩cons empty", async () => {
+    const { data } = await callJson({
+      events: [
+        { id: "go1", title: "Big Summit", url: "" }, // large ⇒ go
+        { id: "skip1", title: "Tiny meetup", url: "" }, // small no-hv ⇒ skip
+      ],
+      enrichment: {
+        go1: { attendeeCount: 300 },
+        skip1: { attendeeCount: 10, highValueAttendees: false },
+      },
+      heuristicOnly: true,
+    });
+    for (const it of data.ranked) {
+      if (it.decision === "go") assert.ok(it.pros.length >= 1, "go ⇒ ≥1 pro");
+      if (it.decision === "skip") assert.ok(it.cons.length >= 1, "skip ⇒ ≥1 con");
+      const overlap = it.pros.filter((p: string) => it.cons.includes(p));
+      assert.equal(overlap.length, 0, `pros/cons overlap: ${overlap.join(", ")}`);
+    }
+  });
+
+  // A09 — documented decision bands.
+  await check("A09 bands: conflict⇒skip, ≤60 no-hv⇒skip, ≥150⇒go, unknown⇒maybe", async () => {
+    const { data } = await callJson({
+      events: [
+        { id: "small", title: "Small no-hv", url: "" },
+        { id: "large", title: "Large room", url: "" },
+        { id: "unknown", title: "Unknown size", url: "" },
+        { id: "conflict", title: "Clashes", url: "", datetime: "2026-09-04T18:00:00-07:00" },
+      ],
+      enrichment: {
+        small: { attendeeCount: 40, highValueAttendees: false },
+        large: { attendeeCount: 200 },
+        conflict: { attendeeCount: 500 }, // huge, but conflict forces skip
+      },
+      busyEvents: [
+        { id: "busy", title: "Standing dinner", datetime: "2026-09-04T18:30:00-07:00", source: "ics" },
+      ],
+      heuristicOnly: true,
+    });
+    const by: Record<string, any> = {};
+    for (const it of data.ranked) by[it.event.id] = it;
+    assert.equal(by.small.decision, "skip", "≤60 no-hv ⇒ skip");
+    assert.equal(by.large.decision, "go", "≥150 ⇒ go");
+    assert.equal(by.unknown.decision, "maybe", "unknown size ⇒ maybe");
+    assert.equal(by.conflict.decision, "skip", "hard conflict ⇒ skip");
+  });
+
+  // A11 — ordering: go>maybe>skip, then score desc, stable ties.
+  await check("A11 ordering go>maybe>skip, score desc, stable ties", async () => {
+    const { data } = await callJson({
+      events: [
+        { id: "s", title: "skip one", url: "" },
+        { id: "g1", title: "go lower", url: "" },
+        { id: "m", title: "maybe one", url: "" },
+        { id: "g2", title: "go higher", url: "" },
+      ],
+      enrichment: {
+        s: { attendeeCount: 10 }, // skip
+        g1: { attendeeCount: 160 }, // go, score 70
+        m: {}, // maybe
+        g2: { attendeeCount: 160, highValueAttendees: true }, // go, score 88
+      },
+      heuristicOnly: true,
+    });
+    const ids = data.ranked.map((r: any) => r.event.id);
+    assert.deepEqual(ids, ["g2", "g1", "m", "s"], `unexpected order: ${ids.join(",")}`);
+    const rank = (d: string) => (d === "go" ? 2 : d === "maybe" ? 1 : 0);
+    for (let i = 1; i < data.ranked.length; i++) {
+      const a = data.ranked[i - 1];
+      const b = data.ranked[i];
+      assert.ok(
+        rank(a.decision) > rank(b.decision) ||
+          (rank(a.decision) === rank(b.decision) && a.score >= b.score),
+        "ordering invariant holds",
+      );
+    }
+  });
+
+  // A14 — id+title only ⇒ scored item, no throw.
+  await check("A14 id+title only ⇒ scored RankedItem (graceful)", async () => {
+    const { status, data } = await callJson({
+      events: [{ id: "paste-0", title: "Bare event" }],
+      heuristicOnly: true,
+    });
+    assert.equal(status, 200);
+    assert.equal(data.ranked.length, 1);
+    assert.ok(Number.isInteger(data.ranked[0].score));
+    assert.ok(DECISIONS.has(data.ranked[0].decision));
+  });
+
+  // A19 — 20-event batch under 1s locally.
+  await check("A19 20-event batch < 1s", async () => {
+    const events = Array.from({ length: 20 }, (_, i) => ({ id: `paste-${i}`, title: `Event ${i}`, url: "" }));
+    const start = process.hrtime.bigint();
+    const { status, data } = await callJson({ events, heuristicOnly: true });
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    assert.equal(status, 200);
+    assert.equal(data.count, 20);
+    assert.ok(ms < 1000, `took ${ms.toFixed(1)}ms (must be <1000ms)`);
+  });
+
+  // A20 — event-specific signal referenced in rationale.
+  await check("A20 rationale references the specific signal", async () => {
+    const { data } = await callJson({
+      events: [{ id: "paste-0", title: "AI Infra Dinner", url: "" }],
+      goalKeywords: ["ai infra"],
+      enrichment: { "paste-0": { attendeeCount: 42, highValueAttendees: true } },
+      heuristicOnly: true,
+    });
+    const it = data.ranked[0];
+    const blob = [...it.pros, ...it.cons].join(" ").toLowerCase();
+    assert.ok(blob.includes("42"), "references the specific attendee count");
+    assert.ok(blob.includes("ai infra"), "references the matched goal keyword");
+  });
+
+  // A23 — score rendered in the card equals the API score (no display drift).
+  await check("A23 card renders the exact numeric score", async () => {
+    const { data } = await callJson({
+      events: [{ id: "paste-0", title: "Scored", url: "" }],
+      enrichment: { "paste-0": { attendeeCount: 200, highValueAttendees: true } },
+      heuristicOnly: true,
+    });
+    const it = data.ranked[0] as RankCardItem;
+    const html = renderToStaticMarkup(<RankCard item={it} />);
+    assert.ok(html.includes(String(it.score)), `card must show score ${it.score}`);
+    assert.ok(html.includes("/100"), "card shows 0–100 scale");
+  });
+
+  // A10/A21 — card renders title, a distinguishable decision badge with a text
+  // label + accessible aria-label (colour never the sole signal).
+  await check("A10/A21 card: title + labelled/aria decision badge per state", () => {
+    for (const decision of ["go", "maybe", "skip"] as const) {
+      const html = renderToStaticMarkup(
+        <RankCard
+          item={{
+            event: { id: "x", title: "Badge Test", url: "" },
+            decision,
+            score: 50,
+            pros: decision === "skip" ? [] : ["a pro"],
+            cons: decision === "skip" ? ["a con"] : [],
+          }}
+        />,
+      );
+      assert.ok(html.includes("Badge Test"), "renders the title");
+      assert.ok(html.includes(`sb-rank-badge-${decision}`), "state-specific badge class");
+      assert.ok(html.includes(`Recommendation: ${decision}`), "accessible aria-label present");
+      assert.ok(/GO|MAYBE|SKIP/.test(html), "badge carries a text label, not colour alone");
+    }
+  });
+
+  // A02/A18 — parser ships zero sample data; empty/blank input ⇒ no events.
+  await check("A02/A18 empty & blank paste ⇒ zero events (no sample data)", () => {
+    assert.deepEqual(parsePastedEvents(""), { events: [], error: null });
+    assert.deepEqual(parsePastedEvents("   \n  \n"), { events: [], error: null });
+    // Line + JSON modes assign stable paste-<i> ids and keep duplicate titles.
+    const lines = parsePastedEvents("Dinner @ SoMa | 2026-09-04T18:00:00-07:00\nDinner");
+    assert.equal(lines.error, null);
+    assert.deepEqual(lines.events.map((e) => e.id), ["paste-0", "paste-1"]);
+    assert.equal(lines.events[0].location, "SoMa");
+    const bad = parsePastedEvents("[ {not json ]");
+    assert.ok(bad.error && bad.events.length === 0, "malformed JSON ⇒ inline error, no crash");
+  });
+
+  // A29 — hostile field shapes still return 200 well-formed (no 500).
+  await check("A29 hostile field shapes ⇒ 200 well-formed RankedItem", async () => {
+    const { status, data } = await callJson({
+      events: [
+        {
+          id: "paste-0",
+          title: "Hostile",
+          url: 12345, // non-string url
+          host: { evil: true }, // non-string dropped
+          location: ["x"], // non-string dropped
+          datetime: 99, // non-string dropped
+          description: "y".repeat(5000), // oversized ⇒ truncated
+        },
+      ],
+      goalKeywords: ["ok", 5, null], // non-strings filtered
+      busyEvents: [{ nonsense: true }, "garbage"], // malformed ⇒ ignored
+      enrichment: {
+        "paste-0": { attendeeCount: -3, highValueAttendees: "yes" }, // both ignored
+      },
+      heuristicOnly: true,
+    });
+    assert.equal(status, 200);
+    const it = data.ranked[0];
+    assert.equal(it.event.url, "", "non-string url ⇒ ''");
+    assert.equal(it.event.host, undefined, "non-string host dropped");
+    assert.ok(it.event.description.length <= 2000, "description truncated");
+    assert.ok(DECISIONS.has(it.decision) && Number.isInteger(it.score), "still well-formed");
   });
 
   console.log(`\nrank-smoke: ${passed} checks passed`);
