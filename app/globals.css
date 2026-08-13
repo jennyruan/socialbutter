@@ -586,6 +586,81 @@ input:focus, textarea:focus { outline: 2px solid var(--accent-focus); outline-of
   line-height: 1.4;
 }
 
+/* --- /rank view: ranked-event cards ------------------------------- */
+
+.sb-rank-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+}
+.sb-rank-go    { border-color: #7A9A6B; }
+.sb-rank-maybe { border-color: #D4B457; }
+.sb-rank-skip  { border-color: #C4534A; opacity: 0.9; }
+
+.sb-rank-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.sb-rank-badge {
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  border: 2px solid var(--border-default);
+  /* color is never the sole signal — the ✓/?/✗ glyph + text label carry it too */
+}
+.sb-rank-badge-go    { background: #7A9A6B; color: var(--bg-pane); }
+.sb-rank-badge-maybe { background: #D4B457; color: var(--text-primary); }
+.sb-rank-badge-skip  { background: #C4534A; color: var(--bg-pane); }
+
+.sb-rank-score {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+}
+.sb-rank-score-max { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+
+.sb-rank-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sb-rank-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sb-rank-list li { font-size: 13px; line-height: 1.5; color: var(--text-primary); }
+.sb-rank-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--border-default);
+}
+.sb-rank-pros .sb-rank-tag { background: rgba(122, 154, 107, 0.18); border-color: #7A9A6B; }
+.sb-rank-cons .sb-rank-tag { background: rgba(196, 83, 74, 0.16); border-color: #C4534A; }
+.sb-rank-rawurl { word-break: break-all; color: var(--text-muted); font-size: 12px; }
+
+.sb-rank-empty { text-align: left; }
+.sb-rank-empty-list { display: flex; flex-direction: column; gap: 6px; padding-left: 18px; }
+.sb-rank-empty-list li { list-style: disc; }
+
 @media (max-width: 640px) {
   .sb-header { padding: 12px 16px; }
   .sb-main { padding: 18px 16px 80px; }

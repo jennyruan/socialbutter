@@ -152,8 +152,8 @@ export function icsDateToIso(value: string): string {
 
 function extractOrganizerName(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  // ORGANIZER values look like "CN=Jane Doe:mailto:jane@example.com" or
-  // sometimes just "mailto:jane@example.com". Prefer CN if present.
+  // ORGANIZER values look like "CN=<name>:mailto:<addr>" or sometimes just
+  // "mailto:<addr>" (per RFC 5545). Prefer the CN display name if present.
   const cn = value.match(/CN=([^:;]+)/i);
   if (cn) return cn[1].trim();
   const mailto = value.match(/mailto:([^\s]+)/i);
