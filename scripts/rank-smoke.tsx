@@ -71,6 +71,21 @@ async function main() {
     assert.equal(res.status, 413);
   });
 
+  // (i-b) >1 MB raw body with a LYING (too-small) Content-Length ⇒ still 413.
+  // Proves the cap is enforced by counting streamed bytes, not by trusting the
+  // header — a spoofed Content-Length cannot bypass the DoS guard.
+  await check("(i-b) >1MB body + false small Content-Length ⇒ still 413", async () => {
+    const req = new Request("http://localhost/api/rank", {
+      method: "POST",
+      headers: { "content-length": "10" }, // lie: real body is 2 MB
+      body: bigStream(2 * 1024 * 1024),
+      // @ts-expect-error duplex is required by Node/undici for a stream body
+      duplex: "half",
+    });
+    const res = await POST(req);
+    assert.equal(res.status, 413);
+  });
+
   // (ii) keys set + heuristicOnly ⇒ zero fetch calls, rankingSource heuristic.
   await check("(ii) keys set + heuristicOnly ⇒ 0 LLM calls, rankingSource=heuristic", async () => {
     process.env.LLM_API_KEY = "test-llm-key";

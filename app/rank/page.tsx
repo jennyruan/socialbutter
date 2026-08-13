@@ -9,13 +9,14 @@ import { RankCard, type RankCardItem } from "./RankCard";
 // each event's decision, 0–100 score, and distinct pros/cons. No accounts, no
 // API keys, no LLM, no persistence, and NO prefilled/sample data.
 
-const PLACEHOLDER = `Paste one event per line:
+// Format instructions ONLY — no sample/example event data (contract A02).
+const PLACEHOLDER = `Paste your events — one per line, using this format:
 
-AI Infra Founders Dinner @ SoMa | 2026-09-04T18:00:00-07:00
-Big Tech Networking Mixer @ SF
-Quiet Coffee Chat
+  Title @ Location | <ISO datetime>
 
-— or paste a JSON array of { "title", "url"?, "datetime"?, "location"? }`;
+Only the title is required; "@ Location" and "| <ISO datetime>" are optional.
+
+— or paste a JSON array of event objects, each with a "title" (and optional "url", "datetime", "location").`;
 
 export default function RankPage() {
   const [text, setText] = useState("");
