@@ -138,7 +138,7 @@ export async function rankEvents(
   const busySlots = eventsToBusySlots(busyEvents);
   const conflicts = events.map(ev =>
     ev.datetime
-      ? findConflict({ datetime: ev.datetime, endDatetime: ev.endDatetime }, busySlots, busyEvents)
+      ? findConflict({ datetime: ev.datetime, endDatetime: ev.endDatetime }, busySlots)
       : null,
   );
 

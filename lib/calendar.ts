@@ -171,34 +171,87 @@ function dedupeById(items: CalendarEvent[]): CalendarEvent[] {
 
 // --- Conflict detection (used by agent ranking) --------------------------
 
-export interface TimeRange { start: number; end: number }
+const HOUR_MS = 60 * 60 * 1000;
 
-/** Convert events to numeric ms ranges; skip events without a parseable start. */
-export function eventsToBusySlots(events: CalendarEvent[]): TimeRange[] {
-  const slots: TimeRange[] = [];
+/**
+ * A busy window carrying its OWN source event. Pairing the parsed range with
+ * its event (instead of a parallel `busyEvents[i]` array) removes the
+ * index-alignment footgun: `eventsToBusySlots` skips unparseable entries, so
+ * any caller relying on positional mapping would name the WRONG colliding
+ * event. Here the slot is self-describing, so conflict naming is correct for
+ * every caller (route + agent).
+ */
+export interface BusySlot {
+  start: number;
+  end: number;
+  event: CalendarEvent;
+}
+
+/**
+ * Parse an ISO datetime to epoch ms ONLY when it is unambiguous — it must
+ * carry an explicit time component (`THH:MM`) AND an explicit timezone offset
+ * (`Z` or `±HH:MM`). Date-only (`2026-09-04`) and offset-less/naive
+ * (`2026-09-04T18:00`) strings return `null`: the former would silently become
+ * a midnight slot, the latter would be interpreted in the SERVER's timezone and
+ * produce false or missed conflicts when mixed with offset-bearing calendar
+ * data. Requiring the offset makes every compared instant absolute.
+ */
+const STRICT_INSTANT_RE = /T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
+
+export function parseStrictInstant(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const s = value.trim();
+  if (!STRICT_INSTANT_RE.test(s)) return null;
+  const ms = Date.parse(s);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** True when a datetime is precise enough (time + offset) to place on a timeline. */
+export function isPlaceable(datetime: unknown): boolean {
+  return parseStrictInstant(datetime) !== null;
+}
+
+/**
+ * Build the end of a time window. Falls back to `start + 1h` when the end is
+ * missing, unparseable, offset-less/date-only, OR inverted/zero-length
+ * (`end <= start`) — so a malformed end can never MISS a real overlap.
+ */
+function windowEnd(start: number, endDatetime: unknown): number {
+  const end = parseStrictInstant(endDatetime);
+  if (end === null || end <= start) return start + HOUR_MS;
+  return end;
+}
+
+/**
+ * Convert calendar events to self-describing busy slots. Entries whose start is
+ * not a strict instant (time + offset) are skipped — they can't be placed on a
+ * timeline unambiguously, so they cannot form a conflict.
+ */
+export function eventsToBusySlots(events: CalendarEvent[]): BusySlot[] {
+  const slots: BusySlot[] = [];
   for (const e of events) {
-    const start = Date.parse(e.datetime);
-    if (Number.isNaN(start)) continue;
-    const end = e.endDatetime ? Date.parse(e.endDatetime) : start + 60 * 60 * 1000; // assume 1hr
-    slots.push({ start, end: Number.isNaN(end) ? start + 60 * 60 * 1000 : end });
+    const start = parseStrictInstant(e.datetime);
+    if (start === null) continue;
+    slots.push({ start, end: windowEnd(start, e.endDatetime), event: e });
   }
   return slots;
 }
 
-/** Find the first busy slot that overlaps the candidate event's time window. */
+/**
+ * Find the first busy slot that overlaps the candidate's time window. Returns
+ * that slot's OWN event (no positional index mapping), so the named colliding
+ * entry is always correct. Returns `null` when the candidate has no placeable
+ * start (caller should treat this as "not conflict-checked", not "all clear").
+ */
 export function findConflict(
-  candidate: { datetime: string; endDatetime?: string },
-  busy: TimeRange[],
-  busyEvents: CalendarEvent[],
+  candidate: { datetime?: string; endDatetime?: string },
+  slots: BusySlot[],
 ): CalendarEvent | null {
-  const start = Date.parse(candidate.datetime);
-  if (Number.isNaN(start)) return null;
-  const end = candidate.endDatetime ? Date.parse(candidate.endDatetime) : start + 60 * 60 * 1000;
-  for (let i = 0; i < busy.length; i++) {
-    const slot = busy[i];
-    if (start < slot.end && end > slot.start) {
-      return busyEvents[i] ?? null;
-    }
+  const start = parseStrictInstant(candidate.datetime);
+  if (start === null) return null;
+  const end = windowEnd(start, candidate.endDatetime);
+  for (const slot of slots) {
+    if (start < slot.end && end > slot.start) return slot.event;
   }
   return null;
 }

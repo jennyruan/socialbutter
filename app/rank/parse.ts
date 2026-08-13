@@ -30,6 +30,95 @@ export function parsePastedEvents(raw: string): ParseResult {
   return parseLineMode(raw);
 }
 
+// --- Busy calendar paste ---------------------------------------------------
+// The optional second control on /rank. A busy entry REQUIRES a datetime — a
+// timeless slot cannot conflict, so lines/objects without a parseable ISO
+// datetime are dropped and counted (never fabricated into a midnight slot).
+
+export interface ParsedBusyEvent {
+  id: string;
+  title: string;
+  datetime: string;
+  endDatetime?: string;
+}
+
+export interface ParseBusyResult {
+  events: ParsedBusyEvent[];
+  /** How many entries were dropped for lacking a parseable datetime. */
+  skipped: number;
+  error: string | null;
+}
+
+export function parseBusyCalendar(raw: string): ParseBusyResult {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return { events: [], skipped: 0, error: null };
+  if (trimmed.startsWith("[")) return parseBusyJson(trimmed);
+  return parseBusyLines(raw);
+}
+
+function parseBusyJson(trimmed: string): ParseBusyResult {
+  let data: unknown;
+  try {
+    data = JSON.parse(trimmed);
+  } catch {
+    return { events: [], skipped: 0, error: "That doesn't look like valid JSON. Check for a stray comma or quote." };
+  }
+  if (!Array.isArray(data)) {
+    return { events: [], skipped: 0, error: "Calendar JSON must be an array of {title, datetime} objects." };
+  }
+  const events: ParsedBusyEvent[] = [];
+  let skipped = 0;
+  for (const item of data) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      skipped++;
+      continue;
+    }
+    const rec = item as Record<string, unknown>;
+    const title = typeof rec.title === "string" ? rec.title.trim() : "";
+    const datetime = typeof rec.datetime === "string" ? rec.datetime.trim() : "";
+    if (!datetime || Number.isNaN(Date.parse(datetime))) {
+      skipped++;
+      continue;
+    }
+    const ev: ParsedBusyEvent = {
+      id: `busy-${events.length}`,
+      title: title || "a calendar event",
+      datetime,
+    };
+    if (typeof rec.endDatetime === "string" && rec.endDatetime.trim()) {
+      ev.endDatetime = rec.endDatetime.trim();
+    }
+    events.push(ev);
+  }
+  return { events, skipped, error: null };
+}
+
+function parseBusyLines(raw: string): ParseBusyResult {
+  const events: ParsedBusyEvent[] = [];
+  let skipped = 0;
+  for (const line of raw.split("\n")) {
+    const t = line.trim();
+    if (!t) continue; // blank lines aren't "skipped" entries — just whitespace
+    const pipe = t.lastIndexOf(" | ");
+    if (pipe === -1) {
+      skipped++;
+      continue;
+    }
+    const title = t.slice(0, pipe).trim();
+    const datetime = t.slice(pipe + 3).trim();
+    if (!datetime || Number.isNaN(Date.parse(datetime))) {
+      skipped++;
+      continue;
+    }
+    events.push({
+      id: `busy-${events.length}`,
+      title: title || "a calendar event",
+      datetime,
+    });
+  }
+  return { events, skipped, error: null };
+}
+
 function parseJsonMode(trimmed: string): ParseResult {
   let data: unknown;
   try {

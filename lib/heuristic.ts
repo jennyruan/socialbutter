@@ -18,7 +18,7 @@
 // supplies via opts. This keeps the event contract clean and the function pure.
 
 import type { RankableEvent } from "./agent";
-import { eventsToBusySlots, findConflict, type CalendarEvent } from "./calendar";
+import { eventsToBusySlots, findConflict, isPlaceable, type CalendarEvent } from "./calendar";
 
 // --- Tunable constants (kept explicit so smoke tests stay stable) ----------
 export const SMALL_MAX = 60; // <= this is a "small" curated-only room
@@ -46,6 +46,19 @@ export interface HeuristicScore {
   score: number;
   pros: string[];
   cons: string[];
+  /**
+   * The colliding busy entry when a hard time conflict was detected, else null.
+   * This is the SAME `findConflict` result the "Time conflict" con string was
+   * built from — never a second, re-derived or con-parsed computation.
+   */
+  conflict: { title: string; datetime: string } | null;
+  /**
+   * True when a busy calendar was supplied AND this event's `datetime` was
+   * precise enough (explicit time + offset) to actually run conflict detection.
+   * False when there was nothing to check against or the time couldn't be
+   * placed — the caller must NOT render a false "all-clear" in that case.
+   */
+  conflictChecked: boolean;
 }
 
 function clamp(n: number): number {
@@ -74,16 +87,22 @@ export function scoreEventHeuristic(
   const cons: string[] = [];
 
   // 1. Hard calendar conflict → skip, short-circuit.
-  if (opts.busyEvents && opts.busyEvents.length > 0 && event.datetime) {
-    const busy = eventsToBusySlots(opts.busyEvents);
-    const conflict = findConflict(
+  //    conflictChecked is true only when there IS a busy calendar to check
+  //    against AND the event's time is placeable (explicit time + offset);
+  //    otherwise the caller must not present a green all-clear.
+  let conflict: { title: string; datetime: string } | null = null;
+  let conflictChecked = false;
+  if (opts.busyEvents && opts.busyEvents.length > 0 && isPlaceable(event.datetime)) {
+    conflictChecked = true;
+    const slots = eventsToBusySlots(opts.busyEvents);
+    const hit = findConflict(
       { datetime: event.datetime, endDatetime: event.endDatetime },
-      busy,
-      opts.busyEvents,
+      slots,
     );
-    if (conflict) {
-      cons.push(`Time conflict with "${conflict.title}"`);
-      return { decision: "skip", score: clamp(0), pros, cons };
+    if (hit) {
+      conflict = { title: hit.title, datetime: hit.datetime };
+      cons.push(`Time conflict with "${hit.title}"`);
+      return { decision: "skip", score: clamp(0), pros, cons, conflict, conflictChecked };
     }
   }
 
@@ -133,5 +152,5 @@ export function scoreEventHeuristic(
     if (decision === "maybe" && score >= 65) decision = "go";
   }
 
-  return { decision, score: clamp(score), pros, cons };
+  return { decision, score: clamp(score), pros, cons, conflict, conflictChecked };
 }

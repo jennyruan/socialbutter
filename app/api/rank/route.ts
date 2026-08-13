@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 // transitive vendor clients). rankEvents is imported dynamically in the LLM path.
 import type { RankableEvent, RankedEvent, Verdict } from "@/lib/agent";
 import type { CalendarEvent } from "@/lib/calendar";
+import { parseStrictInstant } from "@/lib/calendar";
 import { scoreEventHeuristic, type ScoreEventHeuristicOptions } from "@/lib/heuristic";
 import { normalizeUrl } from "@/lib/url-safe";
 
@@ -13,6 +14,11 @@ export const maxDuration = 60;
 // --- Hard limits (the trust boundary) ------------------------------------
 const BODY_BYTE_CAP = 1_048_576; // 1 MB raw bytes, enforced BEFORE JSON.parse
 const MAX_EVENTS = 200;
+
+// Busy-calendar trust boundary.
+const MAX_BUSY = 1000; // checked-entry cap; overflow ⇒ busyTruncated:true
+const CAP_BUSY_TITLE = 200; // a giant pasted title can't be amplified into conflict.title
+const CAP_BUSY_SHORT = 500; // id / host / source / sourceLabel
 
 // Field length caps (graceful truncation, never rejection).
 const CAP_TITLE = 500;
@@ -33,6 +39,21 @@ interface RankedItem {
   score: number | null;
   pros: string[];
   cons: string[];
+  /** The colliding busy entry, or null when no hard conflict / not checked. */
+  conflict: { title: string; datetime: string } | null;
+  /** True only when a busy calendar was sent AND the event's time was placeable. */
+  conflictChecked: boolean;
+}
+
+/** Busy-calendar normalization result — carries honest accounting for the response. */
+interface BusyResult {
+  events: CalendarEvent[];
+  /** How many entries actually participated in conflict detection. */
+  considered: number;
+  /** How many entries were dropped as invalid (unparseable / date-only / offset-less). */
+  skipped: number;
+  /** True when more than MAX_BUSY entries were sent (overflow silently unused). */
+  truncated: boolean;
 }
 
 interface RankBody {
@@ -155,24 +176,47 @@ function normalizeGoalKeywords(raw: unknown): string[] {
   return raw.filter((k): k is string => typeof k === "string");
 }
 
-/** Drop malformed calendar entries per-entry (never index-misaligned). */
-function normalizeBusyEvents(raw: unknown): CalendarEvent[] {
-  if (!Array.isArray(raw)) return [];
-  const out: CalendarEvent[] = [];
-  for (const e of raw) {
-    if (!isPlainObject(e)) continue;
-    if (typeof e.datetime !== "string" || Number.isNaN(Date.parse(e.datetime))) continue;
-    out.push({
-      id: typeof e.id === "string" ? e.id : "",
-      title: typeof e.title === "string" && e.title.trim() ? e.title : "a calendar event",
-      host: typeof e.host === "string" ? e.host : "",
-      datetime: e.datetime,
-      endDatetime: typeof e.endDatetime === "string" ? e.endDatetime : undefined,
-      source: (typeof e.source === "string" ? e.source : "ics") as CalendarEvent["source"],
-      sourceLabel: typeof e.sourceLabel === "string" ? e.sourceLabel : "Calendar",
+/**
+ * Normalize the busy calendar at the trust boundary. Per-entry validation
+ * (never index-misaligned, never throws):
+ *  - Only the first MAX_BUSY entries are checked; overflow ⇒ truncated:true.
+ *  - `datetime` MUST be a strict instant (explicit time + offset). Date-only
+ *    (`2026-09-04`) and offset-less (`2026-09-04T18:00`) values are dropped and
+ *    counted in `skipped` — no silent midnight slot, no server-TZ ambiguity.
+ *  - `endDatetime` that is not a strict instant is treated as ABSENT (→ the
+ *    slot's window falls back to start+1h), never parsed in server TZ.
+ *  - Every string field is length-capped (title ≤ 200) so a giant pasted title
+ *    can't be echoed/amplified into the response.
+ */
+function normalizeBusyEvents(raw: unknown): BusyResult {
+  if (!Array.isArray(raw)) return { events: [], considered: 0, skipped: 0, truncated: false };
+  const truncated = raw.length > MAX_BUSY;
+  const slice = truncated ? raw.slice(0, MAX_BUSY) : raw;
+  const events: CalendarEvent[] = [];
+  let skipped = 0;
+  for (const e of slice) {
+    if (!isPlainObject(e) || parseStrictInstant(e.datetime) === null) {
+      skipped++;
+      continue;
+    }
+    const endStrict =
+      typeof e.endDatetime === "string" && parseStrictInstant(e.endDatetime) !== null
+        ? e.endDatetime
+        : undefined;
+    events.push({
+      id: typeof e.id === "string" ? truncate(e.id, CAP_BUSY_SHORT) : "",
+      title:
+        typeof e.title === "string" && e.title.trim()
+          ? truncate(e.title, CAP_BUSY_TITLE)
+          : "a calendar event",
+      host: typeof e.host === "string" ? truncate(e.host, CAP_BUSY_SHORT) : "",
+      datetime: e.datetime as string,
+      endDatetime: endStrict,
+      source: (typeof e.source === "string" ? truncate(e.source, CAP_BUSY_SHORT) : "ics") as CalendarEvent["source"],
+      sourceLabel: typeof e.sourceLabel === "string" ? truncate(e.sourceLabel, CAP_BUSY_SHORT) : "Calendar",
     });
   }
-  return out;
+  return { events, considered: events.length, skipped, truncated };
 }
 
 /**
@@ -209,6 +253,8 @@ function rankHeuristic(
         score: h.score,
         pros: h.pros,
         cons: h.cons,
+        conflict: h.conflict,
+        conflictChecked: h.conflictChecked,
       };
       return { item, score: h.score, index };
     })
@@ -254,8 +300,18 @@ export async function POST(req: Request) {
   const useHeuristic = heuristicOnly || !haveVendorKeys();
   const rankingSource = useHeuristic ? "heuristic" : "llm";
 
+  // Busy-calendar accounting is present on EVERY 200 path (empty / heuristic /
+  // LLM) so the client always sees a consistent shape — defaults to 0/false/0
+  // when no busyEvents were sent.
+  const busy = normalizeBusyEvents(body.busyEvents);
+  const busyMeta = {
+    busyConsidered: busy.considered,
+    busyTruncated: busy.truncated,
+    busySkipped: busy.skipped,
+  };
+
   if (rawEvents.length === 0) {
-    return NextResponse.json({ ranked: [], count: 0, rankingSource });
+    return NextResponse.json({ ranked: [], count: 0, rankingSource, ...busyMeta });
   }
   if (rawEvents.length > MAX_EVENTS) {
     return NextResponse.json(
@@ -283,13 +339,13 @@ export async function POST(req: Request) {
   }
 
   const goalKeywords = normalizeGoalKeywords(body.goalKeywords);
-  const busyEvents = normalizeBusyEvents(body.busyEvents);
+  const busyEvents = busy.events;
   const enrichment = normalizeEnrichment(body.enrichment);
 
   // 5a. Offline heuristic path — authoritative decision/score/pros/cons.
   if (useHeuristic) {
     const ranked = rankHeuristic(events, goalKeywords, busyEvents, enrichment);
-    return NextResponse.json({ ranked, count: ranked.length, rankingSource: "heuristic" });
+    return NextResponse.json({ ranked, count: ranked.length, rankingSource: "heuristic", ...busyMeta });
   }
 
   // 5b. LLM path — preserve input order; never fabricate a numeric score.
@@ -309,8 +365,13 @@ export async function POST(req: Request) {
       score: null,
       pros: [],
       cons: [],
+      // The vendor path keeps its own conflict handling inside verdict.reason;
+      // this slice wires the structured conflict field only on the heuristic
+      // path that /rank uses. Shape stays consistent via null / false.
+      conflict: null,
+      conflictChecked: false,
     }));
-    return NextResponse.json({ ranked, count: ranked.length, rankingSource: "llm" });
+    return NextResponse.json({ ranked, count: ranked.length, rankingSource: "llm", ...busyMeta });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },

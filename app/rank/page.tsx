@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { parsePastedEvents } from "./parse";
+import { parsePastedEvents, parseBusyCalendar } from "./parse";
 import { RankCard, type RankCardItem } from "./RankCard";
 
 // Keyless, immediately-usable ranked-events view. The user pastes their own
@@ -18,16 +18,29 @@ Only the title is required; "@ Location" and "| <ISO datetime>" are optional.
 
 — or paste a JSON array of event objects, each with a "title" (and optional "url", "datetime", "location").`;
 
+// Format instructions ONLY for the busy calendar — no sample/example data.
+const BUSY_PLACEHOLDER = `Optional — paste your existing commitments so conflicts get flagged:
+
+  Title | <ISO datetime with offset, e.g. 2026-09-04T18:00:00-07:00>
+
+A datetime is REQUIRED (lines without one are skipped).
+
+— or a JSON array of { "title", "datetime", "endDatetime"? } objects.`;
+
 export default function RankPage() {
   const [text, setText] = useState("");
+  const [busyText, setBusyText] = useState("");
   const [keywords, setKeywords] = useState("");
   const [items, setItems] = useState<RankCardItem[] | null>(null);
   const [rankingSource, setRankingSource] = useState<string | null>(null);
+  const [calendarProvided, setCalendarProvided] = useState(false);
+  const [calendarWarning, setCalendarWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleRank() {
     setError(null);
+    setCalendarWarning(null);
     const { events, error: parseError } = parsePastedEvents(text);
     if (parseError) {
       setError(parseError);
@@ -37,6 +50,13 @@ export default function RankPage() {
       setError("Paste at least one event above (one per line, or a JSON array).");
       return;
     }
+
+    const busy = parseBusyCalendar(busyText);
+    if (busy.error) {
+      setError(busy.error);
+      return;
+    }
+    const busyProvided = busyText.trim().length > 0;
 
     const goalKeywords = keywords
       .split(",")
@@ -48,12 +68,36 @@ export default function RankPage() {
       const res = await fetch("/api/rank", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ events, goalKeywords, heuristicOnly: true }),
+        body: JSON.stringify({
+          events,
+          goalKeywords,
+          busyEvents: busy.events,
+          heuristicOnly: true,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `Ranking failed (HTTP ${res.status})`);
       setItems((data.ranked ?? []) as RankCardItem[]);
       setRankingSource(data.rankingSource ?? null);
+      setCalendarProvided(busyProvided);
+
+      // Surface honest accounting: client-dropped lines + server-dropped entries
+      // + truncation. Never a silent false negative.
+      const warnings: string[] = [];
+      if (busy.skipped > 0) {
+        warnings.push(
+          `${busy.skipped} calendar ${busy.skipped === 1 ? "entry" : "entries"} skipped for missing a datetime.`,
+        );
+      }
+      if (typeof data.busySkipped === "number" && data.busySkipped > 0) {
+        warnings.push(
+          `${data.busySkipped} calendar ${data.busySkipped === 1 ? "entry" : "entries"} ignored — a datetime needs an explicit time and timezone offset (e.g. 2026-09-04T18:00:00-07:00).`,
+        );
+      }
+      if (data.busyTruncated) {
+        warnings.push("Only the first 1000 calendar entries were checked.");
+      }
+      setCalendarWarning(warnings.length > 0 ? warnings.join(" ") : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -90,6 +134,22 @@ export default function RankPage() {
             placeholder={PLACEHOLDER}
             className="sb-input sb-textarea"
             rows={8}
+            spellCheck={false}
+            disabled={loading}
+          />
+
+          <label className="sb-help-text" htmlFor="sb-rank-busy">
+            <strong>Your busy calendar</strong> (optional) — one per line
+            (<code className="sb-mono">Title | ISO datetime</code>, datetime required),
+            or a JSON array. Events that overlap get flagged as conflicts.
+          </label>
+          <textarea
+            id="sb-rank-busy"
+            value={busyText}
+            onChange={(e) => setBusyText(e.target.value)}
+            placeholder={BUSY_PLACEHOLDER}
+            className="sb-input sb-textarea"
+            rows={5}
             spellCheck={false}
             disabled={loading}
           />
@@ -132,9 +192,14 @@ export default function RankPage() {
               </h2>
               {rankingSource && <span className="sb-mono sb-events-source">source: {rankingSource}</span>}
             </div>
+            {calendarWarning && (
+              <div className="sb-error sb-rank-cal-warning" role="status">
+                {calendarWarning}
+              </div>
+            )}
             <div className="sb-event-grid">
               {items.map((item) => (
-                <RankCard key={item.event.id} item={item} />
+                <RankCard key={item.event.id} item={item} calendarProvided={calendarProvided} />
               ))}
             </div>
           </section>

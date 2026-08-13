@@ -657,6 +657,33 @@ input:focus, textarea:focus { outline: 2px solid var(--accent-focus); outline-of
 .sb-rank-cons .sb-rank-tag { background: rgba(196, 83, 74, 0.16); border-color: #C4534A; }
 .sb-rank-rawurl { word-break: break-all; color: var(--text-muted); font-size: 12px; }
 
+/* Distinct calendar-conflict banner — square, 2px ink border, coral wash. */
+.sb-rank-conflict {
+  border: 2px solid #C4534A;
+  background: rgba(196, 83, 74, 0.12);
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.sb-rank-conflict-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #C4534A;
+}
+/* Neutral "couldn't check your calendar" note — never a green all-clear. */
+.sb-rank-nocheck {
+  border: 1px dashed var(--border-default);
+  background: rgba(0, 0, 0, 0.03);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.sb-rank-cal-warning { margin: 0 0 12px; }
+
 .sb-rank-empty { text-align: left; }
 .sb-rank-empty-list { display: flex; flex-direction: column; gap: 6px; padding-left: 18px; }
 .sb-rank-empty-list li { list-style: disc; }

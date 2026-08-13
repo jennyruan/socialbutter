@@ -23,6 +23,10 @@ export interface RankCardItem {
   score: number | null;
   pros: string[];
   cons: string[];
+  /** Colliding busy entry when a hard conflict was found, else null/absent. */
+  conflict?: { title: string; datetime: string } | null;
+  /** Whether the event's time was precise enough to run conflict detection. */
+  conflictChecked?: boolean;
 }
 
 const BADGE_LABEL: Record<RankDecision, string> = {
@@ -37,9 +41,21 @@ const BADGE_ARIA: Record<RankDecision, string> = {
   skip: "Recommendation: skip",
 };
 
-export function RankCard({ item }: { item: RankCardItem }) {
-  const { event, decision, score, pros, cons } = item;
+export function RankCard({
+  item,
+  calendarProvided = false,
+}: {
+  item: RankCardItem;
+  /** True when the user pasted a busy calendar — drives the "couldn't check" state. */
+  calendarProvided?: boolean;
+}) {
+  const { event, decision, score, pros, cons, conflict, conflictChecked } = item;
   const href = safeHref(event.url);
+  // Distinct calendar states (title/text auto-escaped by JSX — no XSS):
+  //  • conflict present  → red banner naming the colliding entry + skip rec
+  //  • calendar sent but time not placeable → neutral "couldn't check" note
+  //    (NEVER a green all-clear when we didn't actually check)
+  const showCantCheck = calendarProvided && !conflictChecked && !conflict;
 
   return (
     <article className={`sb-card sb-rank-card sb-rank-${decision}`}>
@@ -56,6 +72,21 @@ export function RankCard({ item }: { item: RankCardItem }) {
       </div>
 
       <h3 className="sb-event-title">{event.title}</h3>
+
+      {conflict && (
+        <div className="sb-rank-conflict" role="alert">
+          <span className="sb-rank-conflict-tag">⚠ Calendar conflict</span>{" "}
+          Overlaps <strong>&ldquo;{conflict.title}&rdquo;</strong> on your busy calendar
+          {conflict.datetime ? <span className="sb-mono"> ({conflict.datetime})</span> : null}. Recommend
+          you skip this one.
+        </div>
+      )}
+      {showCantCheck && (
+        <div className="sb-rank-nocheck">
+          Couldn&apos;t check your calendar — this event needs a precise start time (with a timezone
+          offset) to compare against your busy blocks.
+        </div>
+      )}
 
       <div className="sb-rank-meta sb-mono">
         {event.datetime && <span>{event.datetime}</span>}

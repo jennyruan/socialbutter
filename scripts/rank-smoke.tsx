@@ -19,7 +19,7 @@ import { execSync } from "node:child_process";
 import { renderToStaticMarkup } from "react-dom/server";
 import { POST } from "../app/api/rank/route";
 import { RankCard, type RankCardItem } from "../app/rank/RankCard";
-import { parsePastedEvents } from "../app/rank/parse";
+import { parsePastedEvents, parseBusyCalendar } from "../app/rank/parse";
 
 const DECISIONS = new Set(["go", "maybe", "skip"]);
 
@@ -474,6 +474,257 @@ async function main() {
       `url must be capped at 2048, got ${data.ranked[0].event.url.length}`,
     );
     assert.ok(data.ranked[0].event.url.startsWith("https://example.com/"), "scheme/host preserved");
+  });
+
+  // =====================================================================
+  // sb-calendar-align — busy-calendar conflict assertions (contract A20).
+  // Black-box against the REAL route + REAL card. Times all carry an explicit
+  // offset so instants are unambiguous regardless of the runner's TZ.
+  // =====================================================================
+
+  // Shared valid busy title used across overlap tests.
+  const BUSY_AT_1830 = { id: "b1", title: "Standing dinner", datetime: "2026-09-04T18:30:00-07:00" };
+
+  // A20(i) — overlap ⇒ skip + conflict.title == the colliding busy title.
+  await check("A20(i) overlapping event ⇒ skip + conflict names the busy entry", async () => {
+    const { status, data } = await callJson({
+      events: [{ id: "e1", title: "Founders Mixer", url: "", datetime: "2026-09-04T18:00:00-07:00" }],
+      enrichment: { e1: { attendeeCount: 300 } }, // would be "go" if not for the conflict
+      busyEvents: [BUSY_AT_1830],
+      heuristicOnly: true,
+    });
+    assert.equal(status, 200);
+    const it = data.ranked[0];
+    assert.equal(it.decision, "skip", "hard conflict ⇒ skip");
+    assert.ok(it.conflict, "conflict object present");
+    assert.equal(it.conflict.title, "Standing dinner", "names the colliding busy entry");
+    assert.equal(it.conflictChecked, true, "conflict was actually checked");
+    assert.ok(
+      it.cons.some((c: string) => /Time conflict/.test(c)),
+      "cons carries the Time conflict string",
+    );
+  });
+
+  // A20(ii) — no overlap ⇒ conflict null + not calendar-skipped + conflictChecked true.
+  await check("A20(ii) non-overlapping event ⇒ conflict null, not calendar-skipped", async () => {
+    const { data } = await callJson({
+      events: [{ id: "e1", title: "Morning Coffee", url: "", datetime: "2026-09-04T09:00:00-07:00" }],
+      enrichment: { e1: { attendeeCount: 300 } },
+      busyEvents: [BUSY_AT_1830],
+      heuristicOnly: true,
+    });
+    const it = data.ranked[0];
+    assert.equal(it.conflict, null, "no conflict ⇒ null");
+    assert.equal(it.decision, "go", "decision from normal rules, not calendar");
+    assert.equal(it.conflictChecked, true, "a precise time against a busy calendar ⇒ checked");
+  });
+
+  // A20(iii) — index-alignment guard: a dropped-malformed AND a valid
+  // non-overlapping busy entry BEFORE the real one ⇒ named conflict is correct.
+  await check("A20(iii) malformed+non-overlapping busy before real ⇒ correct name", async () => {
+    const { data } = await callJson({
+      events: [{ id: "e1", title: "Evening Talk", url: "", datetime: "2026-09-04T18:00:00-07:00" }],
+      busyEvents: [
+        { id: "m", title: "Dropped (no date)", datetime: "not-a-date" }, // dropped by normalize
+        { id: "am", title: "Morning standup", datetime: "2026-09-04T09:00:00-07:00" }, // valid, no overlap
+        { id: "pm", title: "Evening dinner", datetime: "2026-09-04T18:30:00-07:00" }, // the real overlap
+      ],
+      heuristicOnly: true,
+    });
+    const it = data.ranked[0];
+    assert.equal(it.decision, "skip");
+    assert.equal(it.conflict.title, "Evening dinner", "names the RIGHT entry, not a mis-indexed one");
+  });
+
+  // A20(iv) — candidate with an inverted (end<=start) endDatetime overlapping a
+  // busy slot ⇒ still skip + conflict (window falls back to start+1h, A15).
+  await check("A20(iv) inverted candidate endDatetime ⇒ still skip + conflict", async () => {
+    const { data } = await callJson({
+      events: [
+        {
+          id: "e1",
+          title: "Inverted End",
+          url: "",
+          datetime: "2026-09-04T18:00:00-07:00",
+          endDatetime: "2026-09-04T17:00:00-07:00", // inverted ⇒ ignored, window = start+1h
+        },
+      ],
+      busyEvents: [BUSY_AT_1830],
+      heuristicOnly: true,
+    });
+    const it = data.ranked[0];
+    assert.equal(it.decision, "skip", "inverted end doesn't miss the overlap");
+    assert.equal(it.conflict.title, "Standing dinner");
+  });
+
+  // A20(v) — >1000 busyEvents ⇒ busyTruncated:true, 200, no crash.
+  await check("A20(v) >1000 busyEvents ⇒ busyTruncated:true, 200, no crash", async () => {
+    const busyEvents = Array.from({ length: 1001 }, (_, i) => ({
+      id: `b${i}`,
+      title: `Busy ${i}`,
+      datetime: "2026-09-04T09:00:00-07:00",
+    }));
+    const { status, data } = await callJson({
+      events: [{ id: "e1", title: "Overflow", url: "", datetime: "2026-09-04T12:00:00-07:00" }],
+      busyEvents,
+      heuristicOnly: true,
+    });
+    assert.equal(status, 200);
+    assert.equal(data.busyTruncated, true, "overflow flagged, not silently dropped");
+    assert.equal(data.busyConsidered, 1000, "considered exactly the cap");
+  });
+
+  // A20(vi) — a 250-char busy title ⇒ conflict.title length ≤ 200.
+  await check("A20(vi) 250-char busy title ⇒ conflict.title ≤ 200", async () => {
+    const { data } = await callJson({
+      events: [{ id: "e1", title: "Amplify", url: "", datetime: "2026-09-04T18:00:00-07:00" }],
+      busyEvents: [{ id: "b", title: "X".repeat(250), datetime: "2026-09-04T18:30:00-07:00" }],
+      heuristicOnly: true,
+    });
+    const it = data.ranked[0];
+    assert.equal(it.decision, "skip");
+    assert.ok(it.conflict.title.length <= 200, `title capped, got ${it.conflict.title.length}`);
+  });
+
+  // A20(vi-b) — date-only busy value ⇒ dropped + busySkipped, never a midnight slot.
+  await check("A20(vi-b) date-only busy value ⇒ dropped + busySkipped", async () => {
+    const { data } = await callJson({
+      events: [{ id: "e1", title: "Midnight?", url: "", datetime: "2026-09-04T00:30:00-07:00" }],
+      busyEvents: [{ id: "b", title: "All day", datetime: "2026-09-04" }],
+      heuristicOnly: true,
+    });
+    const it = data.ranked[0];
+    assert.equal(data.busySkipped, 1, "date-only entry counted as skipped");
+    assert.equal(data.busyConsidered, 0, "no valid busy slot formed");
+    assert.equal(it.conflict, null, "no silent midnight conflict");
+  });
+
+  // A20(vi-c) — offset-less/naive busy value ⇒ dropped + busySkipped (no server-TZ ambiguity).
+  await check("A20(vi-c) offset-less busy value ⇒ dropped + busySkipped", async () => {
+    const { data } = await callJson({
+      events: [{ id: "e1", title: "Naive", url: "", datetime: "2026-09-04T18:00:00-07:00" }],
+      busyEvents: [{ id: "b", title: "Naive dinner", datetime: "2026-09-04T18:00" }],
+      heuristicOnly: true,
+    });
+    assert.equal(data.busySkipped, 1, "offset-less entry counted as skipped");
+    assert.equal(data.busyConsidered, 0, "no ambiguous slot formed");
+    assert.equal(data.ranked[0].conflict, null);
+  });
+
+  // A20(vi-d) — offset-less candidate endDatetime ⇒ treated as absent (start+1h);
+  // a candidate whose datetime lacks time+offset ⇒ conflictChecked:false.
+  await check("A20(vi-d) offset-less end ⇒ start+1h; imprecise datetime ⇒ conflictChecked:false", async () => {
+    const r1 = await callJson({
+      events: [
+        {
+          id: "e1",
+          title: "Loose end",
+          url: "",
+          datetime: "2026-09-04T18:00:00-07:00",
+          endDatetime: "2026-09-04T23:00", // offset-less ⇒ ignored, window = start+1h
+        },
+      ],
+      busyEvents: [BUSY_AT_1830],
+      heuristicOnly: true,
+    });
+    assert.equal(r1.data.ranked[0].decision, "skip", "1h fallback still catches the 18:30 overlap");
+
+    const r2 = await callJson({
+      events: [{ id: "e1", title: "Imprecise", url: "", datetime: "2026-09-04T18:00" }], // no offset
+      busyEvents: [BUSY_AT_1830],
+      heuristicOnly: true,
+    });
+    const it2 = r2.data.ranked[0];
+    assert.equal(it2.conflictChecked, false, "imprecise datetime ⇒ not checked");
+    assert.equal(it2.conflict, null, "not a false conflict");
+    assert.notEqual(it2.decision, undefined, "still scored normally");
+  });
+
+  // A20(vii) — a <script> busy title renders ESCAPED in the conflict banner.
+  await check("A20(vii) <script> busy title renders escaped in the conflict banner", () => {
+    const item: RankCardItem = {
+      event: { id: "e1", title: "Safe title", url: "" },
+      decision: "skip",
+      score: 0,
+      pros: [],
+      cons: ['Time conflict with "x"'],
+      conflict: { title: "<script>alert(1)</script>", datetime: "2026-09-04T18:30:00-07:00" },
+      conflictChecked: true,
+    };
+    const html = renderToStaticMarkup(<RankCard item={item} calendarProvided />);
+    assert.ok(html.includes("&lt;script&gt;alert(1)&lt;/script&gt;"), "conflict title escaped");
+    assert.ok(!html.includes("<script>alert(1)</script>"), "no live <script> element");
+    assert.ok(/Calendar conflict/.test(html), "distinct conflict banner rendered");
+  });
+
+  // A21/A04 — busy accounting present on every 200 path, default 0/false/0.
+  await check("A21/A04 busy meta present + defaults 0/false/0 with no busyEvents", async () => {
+    const empty = await callJson({ events: [] });
+    assert.equal(empty.data.busyConsidered, 0);
+    assert.equal(empty.data.busyTruncated, false);
+    assert.equal(empty.data.busySkipped, 0);
+    const heur = await callJson({ events: [{ id: "e1", title: "No cal", url: "" }], heuristicOnly: true });
+    assert.equal(heur.data.busyConsidered, 0);
+    assert.equal(heur.data.busyTruncated, false);
+    assert.equal(heur.data.busySkipped, 0);
+    // No busy calendar ⇒ conflictChecked false for all items (nothing to check).
+    assert.equal(heur.data.ranked[0].conflictChecked, false);
+    assert.equal(heur.data.ranked[0].conflict, null);
+  });
+
+  // A20(vii)/card — non-conflicting card shows NO banner even with calendar provided.
+  await check("non-conflicting card shows no conflict banner", () => {
+    const html = renderToStaticMarkup(
+      <RankCard
+        item={{
+          event: { id: "e1", title: "Clear", url: "" },
+          decision: "go",
+          score: 80,
+          pros: ["a pro"],
+          cons: [],
+          conflict: null,
+          conflictChecked: true,
+        }}
+        calendarProvided
+      />,
+    );
+    assert.ok(!/Calendar conflict/.test(html), "no banner when no conflict");
+    assert.ok(!/check your calendar/.test(html), "no couldn't-check note when checked");
+  });
+
+  // Card: imprecise event with calendar provided ⇒ "couldn't check" note (not all-clear).
+  await check("imprecise event + calendar ⇒ couldn't-check note, not all-clear", () => {
+    const html = renderToStaticMarkup(
+      <RankCard
+        item={{
+          event: { id: "e1", title: "Imprecise", url: "" },
+          decision: "maybe",
+          score: 50,
+          pros: [],
+          cons: ["Attendee count unknown — needs a closer look"],
+          conflict: null,
+          conflictChecked: false,
+        }}
+        calendarProvided
+      />,
+    );
+    assert.ok(/check your calendar/.test(html), "shows couldn't-check note");
+  });
+
+  // Client parser: busy lines without a datetime are dropped + counted (A03).
+  await check("parseBusyCalendar drops datetime-less lines + counts skipped", () => {
+    const r = parseBusyCalendar(
+      "Standing dinner | 2026-09-04T18:30:00-07:00\nNo datetime here\nGym | 2026-09-05T07:00:00-07:00",
+    );
+    assert.equal(r.error, null);
+    assert.equal(r.events.length, 2, "two valid busy entries");
+    assert.equal(r.skipped, 1, "one datetime-less line skipped");
+    assert.deepEqual(r.events.map((e) => e.id), ["busy-0", "busy-1"], "stable busy-<i> ids");
+    // JSON mode + no sample data on empty input.
+    assert.deepEqual(parseBusyCalendar(""), { events: [], skipped: 0, error: null });
+    const j = parseBusyCalendar('[{"title":"X","datetime":"2026-09-04T18:00:00-07:00"},{"title":"Y"}]');
+    assert.equal(j.events.length, 1);
+    assert.equal(j.skipped, 1, "object missing datetime skipped");
   });
 
   console.log(`\nrank-smoke: ${passed} checks passed`);
