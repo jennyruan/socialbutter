@@ -20,6 +20,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { POST } from "../app/api/rank/route";
 import { RankCard, type RankCardItem } from "../app/rank/RankCard";
 import { parsePastedEvents, parseBusyCalendar } from "../app/rank/parse";
+import { splitImportInput, importWarnings, importedToRankable } from "../app/rank/import";
+import { detectSource, type CalendarEvent } from "../lib/calendar";
 
 const DECISIONS = new Set(["go", "maybe", "skip"]);
 
@@ -725,6 +727,182 @@ async function main() {
     const j = parseBusyCalendar('[{"title":"X","datetime":"2026-09-04T18:00:00-07:00"},{"title":"Y"}]');
     assert.equal(j.events.length, 1);
     assert.equal(j.skipped, 1, "object missing datetime skipped");
+  });
+
+  // =====================================================================
+  // sb-rank-url-import — paste-a-link import (spec art_qGXLTdaf).
+  // The splitter is pure (no fetch): these checks pin its classification,
+  // line preservation, and the composed merge shape the client sends to
+  // /api/rank. End-to-end URL fetches are verified live in the PR E2E.
+  // =====================================================================
+
+  // URL1 — classification: every supported URL form lifts out as a token,
+  // in input order; case-insensitive schemes.
+  await check("URL1 splitter: webcal / https-ics / scheme'd lu.ma / bare lu.ma+luma.com ⇒ url tokens, in order", () => {
+    const s = splitImportInput(
+      "webcal://cal.example.com/feed.ics\n" +
+        "HTTPS://CAL.EXAMPLE.COM/holidays.ics\n" +
+        "https://lu.ma/h7h9r7bw\n" +
+        "lu.ma/z9z8z8z8\n" +
+        "luma.com/abc-defg\n" +
+        "https://api.lu.ma/ics/get?entity=calendar&id=cal_x",
+    );
+    assert.deepEqual(s.urls, [
+      "webcal://cal.example.com/feed.ics",
+      "HTTPS://CAL.EXAMPLE.COM/holidays.ics",
+      "https://lu.ma/h7h9r7bw",
+      "lu.ma/z9z8z8z8",
+      "luma.com/abc-defg",
+      "https://api.lu.ma/ics/get?entity=calendar&id=cal_x",
+    ]);
+    assert.equal(s.unsupported.length, 0);
+    assert.equal(s.rest.trim(), "", "a fully-URL paste leaves no residual text");
+  });
+
+  // URL2 — tokenization matches the import route's rule (whitespace/commas);
+  // prose containing the word "webcal" and bare slugs are NOT url tokens.
+  await check("URL2 splitter: comma separation; no false positive on 'webcal' prose or bare slugs", () => {
+    const comma = splitImportInput("https://lu.ma/h7h9r7bw,webcal://cal.example.com/f.ics,lu.ma/z9z8z8z8");
+    assert.equal(comma.urls.length, 3, "commas split tokens like the route does");
+    const prose = splitImportInput("Our webcal feeds sync nightly\nDinner @ SoMa | 2026-09-04T18:00:00-07:00");
+    assert.deepEqual(prose.urls, [], "the word 'webcal' alone is not a URL");
+    assert.deepEqual(prose.unsupported, []);
+    assert.equal(prose.rest, "Our webcal feeds sync nightly\nDinner @ SoMa | 2026-09-04T18:00:00-07:00", "URL-free input passes through byte-for-byte");
+    // The import route's own parser claims bare 4+ char slugs (short event
+    // codes) — the /rank splitter must NOT, or every word becomes a fetch.
+    const bare = splitImportInput("h7h9r7bw");
+    assert.deepEqual(bare.urls, []);
+    assert.deepEqual(bare.unsupported, []);
+    assert.equal(bare.rest, "h7h9r7bw");
+  });
+
+  // URL3 — mixed URL + line: the URL lifts out, the real lines survive for
+  // line-mode parsing with stable paste-<i> ids.
+  await check("URL3 splitter: mixed URL+lines ⇒ rest keeps the two real lines", () => {
+    const s = splitImportInput(
+      "Dinner @ SoMa | 2026-09-04T18:00:00-07:00\nhttps://lu.ma/h7h9r7bw\nMeetup @ Warehouse",
+    );
+    assert.deepEqual(s.urls, ["https://lu.ma/h7h9r7bw"]);
+    const parsed = parsePastedEvents(s.rest);
+    assert.equal(parsed.error, null);
+    assert.equal(parsed.events.length, 2, "line-mode sees exactly the real lines");
+    assert.equal(parsed.events[0].title, "Dinner");
+    assert.equal(parsed.events[1].title, "Meetup");
+    assert.deepEqual(parsed.events.map((e) => e.id), ["paste-0", "paste-1"]);
+  });
+
+  // URL4 — REGRESSION (the defect this spec fixes): a bare URL line used to
+  // become a junk event titled with the URL string. Through the composed
+  // path it must route to the importer instead, leaving no title-event.
+  await check("URL4 regression: URL-only line ⇒ import token, zero junk title-events", () => {
+    const s = splitImportInput("https://lu.ma/h7h9r7bw");
+    assert.equal(s.urls.length, 1);
+    assert.deepEqual(parsePastedEvents(s.rest).events, [], "no junk event from the composed path");
+    // Documents the defect: the raw parser (unsplit) still manufactures a
+    // title-event from a URL line — the page must always split first.
+    const junk = parsePastedEvents("https://lu.ma/h7h9r7bw");
+    assert.equal(junk.events.length, 1);
+    assert.equal(junk.events[0].title, "https://lu.ma/h7h9r7bw");
+  });
+
+  // URL5 — scheme'd tokens the import route would silently drop are caught
+  // client-side as unsupported (warned, never fetched, never dropped silently).
+  await check("URL5 splitter: unsupported tokens ⇒ flagged; prose colons stay text", () => {
+    const s = splitImportInput(
+      "mailto:x@y.z\njavascript:alert(1)\nhttps://example.com/not-a-calendar\nhttps://lu.ma/u/profile\nNote: dinner at eight",
+    );
+    assert.deepEqual(s.unsupported, [
+      "mailto:x@y.z",
+      "javascript:alert(1)",
+      "https://example.com/not-a-calendar",
+      "https://lu.ma/u/profile",
+    ]);
+    assert.deepEqual(s.urls, []);
+    assert.equal(s.rest.trim(), "Note: dinner at eight", "a trailing colon is prose, not a scheme");
+  });
+
+  // URL6 — importWarnings: per-URL errors and unsupported tokens become
+  // visible warnings; empty inputs produce none.
+  await check("URL6 importWarnings: unsupported + per-URL errors ⇒ warnings; none when empty", () => {
+    assert.deepEqual(importWarnings([], []), []);
+    const w = importWarnings(
+      ["mailto:x@y.z"],
+      [{ url: "https://lu.ma/gone", message: "Response wasn't an iCal feed" }],
+    );
+    assert.equal(w.length, 2);
+    assert.ok(w[0].includes("mailto:x@y.z"), "unsupported token named in the warning");
+    assert.ok(w[1].includes("https://lu.ma/gone") && w[1].includes("Response wasn't an iCal feed"), "per-URL failure named in the warning");
+  });
+
+  // URL7 — detectSource rule (committed fix): lu.ma hosts are subscriptions
+  // only for /ics/ paths; event and profile pages reach the Luma fetcher.
+  await check("URL7 detectSource: lu.ma /ics/ ⇒ subscription; event/profile pages ⇒ null", () => {
+    assert.equal(detectSource("https://lu.ma/h7h9r7bw"), null, "event page must not misroute to the ICS fetcher");
+    assert.equal(detectSource("https://lu.ma/u/someone"), null, "profile page too");
+    const sub = detectSource("https://api.lu.ma/ics/get?entity=calendar&id=cal_x");
+    assert.ok(sub && sub.source === "luma", "api.lu.ma/ics/ is a Luma subscription");
+    const shape = detectSource("https://lu.ma/ics/get?entity=calendar&id=cal_x");
+    assert.ok(shape && shape.source === "luma", "/ics/ path shape is a Luma subscription");
+    const webcal = detectSource("webcal://cal.example.com/feed.ics");
+    assert.ok(webcal && webcal.source === "ics", "webcal stays a subscription");
+  });
+
+  // URL8 — conflict integrity: an imported busy event (the exact shape
+  // /api/calendar/import returns, mapped by importedToRankable) collides
+  // exactly like a pasted busy line — skip + named conflict + checked.
+  await check("URL8 imported strict-instant busy event ⇒ skip + named conflict + busyConsidered 1", async () => {
+    const imported: CalendarEvent = {
+      id: "imp-1",
+      title: "Imported standing dinner",
+      host: "cal.example.com",
+      datetime: "2026-09-04T18:30:00-07:00",
+      endDatetime: "2026-09-04T20:30:00-07:00",
+      url: "https://cal.example.com/feed.ics",
+      source: "ics",
+      sourceLabel: "cal.example.com",
+    };
+    const mapped = importedToRankable(imported);
+    assert.equal(mapped.url, "https://cal.example.com/feed.ics");
+    assert.equal(mapped.source, "ics");
+    const { status, data } = await callJson({
+      events: [{ id: "e1", title: "Founders Mixer", url: "", datetime: "2026-09-04T18:00:00-07:00" }],
+      enrichment: { e1: { attendeeCount: 300 } },
+      busyEvents: [mapped],
+      heuristicOnly: true,
+    });
+    assert.equal(status, 200);
+    const it = data.ranked[0];
+    assert.equal(it.decision, "skip", "imported busy entry forces the skip");
+    assert.equal(it.conflict.title, "Imported standing dinner");
+    assert.equal(it.conflictChecked, true);
+    assert.equal(data.busyConsidered, 1, "a strict-instant slot formed from the import");
+    assert.equal(data.busySkipped, 0);
+  });
+
+  // URL9 — busy-box composition with a date-only feed (the US-holiday E2E
+  // expectation, Amendment 1): strict-gate drops with honest accounting,
+  // no fabricated conflicts.
+  await check("URL9 imported date-only busy entries ⇒ busySkipped accounting, no fake conflicts", async () => {
+    const { status, data } = await callJson({
+      events: [{ id: "e1", title: "Any event", url: "", datetime: "2026-09-04T18:00:00-07:00" }],
+      busyEvents: [
+        importedToRankable({
+          id: "hol-1",
+          title: "Constructed holiday",
+          host: "calendar.google.com",
+          datetime: "2026-09-04", // date-only DTSTART normalization output
+          url: "https://cal.example.com/holidays.ics",
+          source: "google",
+          sourceLabel: "Google Calendar",
+        }),
+      ],
+      heuristicOnly: true,
+    });
+    assert.equal(status, 200);
+    assert.equal(data.busySkipped, 1, "date-only import counted as skipped");
+    assert.equal(data.busyConsidered, 0, "no ambiguous slot formed");
+    assert.equal(data.ranked[0].conflict, null, "no fabricated conflict");
+    assert.equal(data.ranked[0].conflictChecked, false, "nothing usable to check against");
   });
 
   console.log(`\nrank-smoke: ${passed} checks passed`);
