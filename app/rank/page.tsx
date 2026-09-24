@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { parsePastedEvents, parseBusyCalendar } from "./parse";
 import { RankCard, type RankCardItem } from "./RankCard";
+import { splitImportInput, importWarnings, importedToRankable } from "./import";
+import type { RankableEvent } from "@/lib/agent";
+import type { CalendarEvent } from "@/lib/calendar";
 
 // Keyless, immediately-usable ranked-events view. The user pastes their own
 // events, ranks them through the offline heuristic path of /api/rank, and sees
@@ -16,6 +19,9 @@ const PLACEHOLDER = `Paste your events — one per line, using this format:
 
 Only the title is required; "@ Location" and "| <ISO datetime>" are optional.
 
+You can also paste calendar subscription URLs (webcal:// or https://…ics) or
+Luma event URLs (https://lu.ma/<event>), mixed in freely with the lines above.
+
 — or paste a JSON array of event objects, each with a "title" (and optional "url", "datetime", "location").`;
 
 // Format instructions ONLY for the busy calendar — no sample/example data.
@@ -23,9 +29,45 @@ const BUSY_PLACEHOLDER = `Optional — paste your existing commitments so confli
 
   Title | <ISO datetime with offset, e.g. 2026-09-04T18:00:00-07:00>
 
-A datetime is REQUIRED (lines without one are skipped).
+A datetime is REQUIRED (lines without one are skipped) — but a pasted calendar
+subscription URL (webcal:// or https://…ics) is exempt: fetching supplies the
+datetimes.
 
 — or a JSON array of { "title", "datetime", "endDatetime"? } objects.`;
+
+// What the import route returns for one box's URL tokens: imported events
+// plus per-URL soft failures (hard failures throw — see importUrlTokens).
+interface ImportOutcome {
+  events: CalendarEvent[];
+  errors: Array<{ url: string; message: string }>;
+}
+
+// Fetch one box's URL tokens through the existing calendar import route.
+// Non-OK response ⇒ throw (the rank aborts with a visible error); per-URL
+// failures ride back in errors[] and render as warnings.
+async function importUrlTokens(urls: string[]): Promise<ImportOutcome> {
+  const res = await fetch("/api/calendar/import", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ input: urls.join("\n") }),
+  });
+  let data: unknown = null;
+  try {
+    data = await res.json();
+  } catch {
+    // handled below — an unparseable body is a hard failure
+  }
+  if (!res.ok) {
+    const message =
+      (data as { error?: string } | null)?.error ?? `Import failed (HTTP ${res.status})`;
+    throw new Error(message);
+  }
+  if (data === null || typeof data !== "object") {
+    throw new Error(`Import returned an unparseable response (HTTP ${res.status}).`);
+  }
+  const parsed = data as { events?: CalendarEvent[]; errors?: ImportOutcome["errors"] };
+  return { events: parsed.events ?? [], errors: parsed.errors ?? [] };
+}
 
 export default function RankPage() {
   const [text, setText] = useState("");
@@ -41,19 +83,25 @@ export default function RankPage() {
   async function handleRank() {
     setError(null);
     setCalendarWarning(null);
-    const { events, error: parseError } = parsePastedEvents(text);
+
+    // 1. Split both boxes: URL tokens detour through /api/calendar/import;
+    // the remainder parses exactly as before.
+    const ev = splitImportInput(text);
+    const busy = splitImportInput(busyText);
+
+    const { events: pasted, error: parseError } = parsePastedEvents(ev.rest);
     if (parseError) {
       setError(parseError);
       return;
     }
-    if (events.length === 0) {
-      setError("Paste at least one event above (one per line, or a JSON array).");
+    if (pasted.length === 0 && ev.urls.length === 0) {
+      setError("Paste at least one event above (one per line, a JSON array, or a calendar/Luma event URL).");
       return;
     }
 
-    const busy = parseBusyCalendar(busyText);
-    if (busy.error) {
-      setError(busy.error);
+    const busyParsed = parseBusyCalendar(busy.rest);
+    if (busyParsed.error) {
+      setError(busyParsed.error);
       return;
     }
     const busyProvided = busyText.trim().length > 0;
@@ -65,13 +113,40 @@ export default function RankPage() {
 
     setLoading(true);
     try {
+      // 2. Import URL tokens — one call per box, so each box's imports merge
+      // into the right payload: the route's response is a flat list with no
+      // per-URL attribution, and an event must not become its own busy slot.
+      const [evImport, busyImport] = await Promise.all([
+        ev.urls.length > 0 ? importUrlTokens(ev.urls) : null,
+        busy.urls.length > 0 ? importUrlTokens(busy.urls) : null,
+      ]);
+      const importedEvents = (evImport?.events ?? []).map(importedToRankable);
+      const importedBusy = busyImport?.events ?? [];
+
+      if (importedEvents.length === 0 && pasted.length === 0) {
+        // Everything was URL tokens and none of it produced an event.
+        const detail = evImport?.errors[0];
+        throw new Error(
+          detail
+            ? `Import failed: ${detail.url}: ${detail.message}`
+            : "No events came back from the pasted URL(s). Paste them as lines or JSON instead.",
+        );
+      }
+
+      // 3. Merge: imported events rank like pasted ones; imported busy
+      // entries carry strict-instant datetimes, so the existing conflict
+      // gate treats them exactly like pasted busy lines.
+      const events: RankableEvent[] = [...pasted, ...importedEvents];
+      const busyEvents = [...busyParsed.events, ...importedBusy];
+
+      // 4. Rank exactly as before — /api/rank is untouched by URL import.
       const res = await fetch("/api/rank", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           events,
           goalKeywords,
-          busyEvents: busy.events,
+          busyEvents,
           heuristicOnly: true,
         }),
       });
@@ -81,12 +156,16 @@ export default function RankPage() {
       setRankingSource(data.rankingSource ?? null);
       setCalendarProvided(busyProvided);
 
-      // Surface honest accounting: client-dropped lines + server-dropped entries
-      // + truncation. Never a silent false negative.
-      const warnings: string[] = [];
-      if (busy.skipped > 0) {
+      // Surface honest accounting: import outcomes (unsupported tokens,
+      // per-URL failures) + client-dropped lines + server-dropped entries +
+      // truncation. Never a silent false negative.
+      const warnings: string[] = importWarnings(
+        [...ev.unsupported, ...busy.unsupported],
+        [...(evImport?.errors ?? []), ...(busyImport?.errors ?? [])],
+      );
+      if (busyParsed.skipped > 0) {
         warnings.push(
-          `${busy.skipped} calendar ${busy.skipped === 1 ? "entry" : "entries"} skipped for missing a datetime.`,
+          `${busyParsed.skipped} calendar ${busyParsed.skipped === 1 ? "entry" : "entries"} skipped for missing a datetime.`,
         );
       }
       if (typeof data.busySkipped === "number" && data.busySkipped > 0) {
@@ -125,7 +204,7 @@ export default function RankPage() {
 
           <label className="sb-help-text" htmlFor="sb-rank-input">
             <strong>Your events</strong> — one per line (<code className="sb-mono">Title @ Location | ISO datetime</code>,
-            only the title is required), or a JSON array.
+            only the title is required), a JSON array, or a calendar subscription / Luma event URL.
           </label>
           <textarea
             id="sb-rank-input"
@@ -141,7 +220,8 @@ export default function RankPage() {
           <label className="sb-help-text" htmlFor="sb-rank-busy">
             <strong>Your busy calendar</strong> (optional) — one per line
             (<code className="sb-mono">Title | ISO datetime</code>, datetime required),
-            or a JSON array. Events that overlap get flagged as conflicts.
+            a JSON array, or a calendar subscription URL (URL lines don&apos;t need
+            a datetime). Events that overlap get flagged as conflicts.
           </label>
           <textarea
             id="sb-rank-busy"
@@ -214,8 +294,8 @@ function EmptyState() {
     <section className="sb-card sb-rank-empty">
       <h2 className="sb-section-title">No events ranked yet</h2>
       <p className="sb-help-text">
-        Paste your events above and hit <strong>Rank my events</strong>. Two ways
-        to enter them:
+        Paste your events above and hit <strong>Rank my events</strong>. Three
+        ways to enter them:
       </p>
       <ul className="sb-help-text sb-rank-empty-list">
         <li>
@@ -225,6 +305,11 @@ function EmptyState() {
         <li>
           <strong>JSON array:</strong> objects with a required <code className="sb-mono">title</code> plus optional{" "}
           <code className="sb-mono">url</code>, <code className="sb-mono">datetime</code>, <code className="sb-mono">location</code>.
+        </li>
+        <li>
+          <strong>URLs:</strong> calendar subscription links (<code className="sb-mono">webcal://</code> or{" "}
+          <code className="sb-mono">https://…ics</code>) or Luma event links (<code className="sb-mono">lu.ma/…</code>),
+          mixed in with the formats above.
         </li>
       </ul>
       <p className="sb-help-text">No accounts, no API keys, no sample data — just your events.</p>
