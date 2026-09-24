@@ -57,7 +57,15 @@ export function detectSource(rawUrl: string): { source: CalendarSource; sourceLa
   const host = u.hostname.toLowerCase();
 
   if (host === "api.lu.ma" || host === "lu.ma") {
-    return { source: "luma", sourceLabel: "Luma" };
+    // On lu.ma hosts, only ICS-feed paths are calendar subscriptions
+    // (api.lu.ma/ics/get?... — the only live ICS shape; lu.ma/<anything>
+    // serves HTML). Any other path is an event page and must reach the Luma
+    // event fetcher instead — fetching it as ICS fails with "Response wasn't
+    // an iCal feed". Matches lib/luma.ts isLumaIcsUrl's feed shape.
+    if (u.pathname.toLowerCase().startsWith("/ics/")) {
+      return { source: "luma", sourceLabel: "Luma" };
+    }
+    return null;
   }
   if (host.endsWith(".icloud.com") || host === "icloud.com") {
     return { source: "apple", sourceLabel: "Apple Calendar" };
